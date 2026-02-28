@@ -199,6 +199,15 @@ def update_settings():
             
         # Reload config in current app (simplified)
         for key, value in data.items():
+            # Resolve relative paths relative to project root
+            if key in ['DB_PATH', 'CACHE_DIR'] and not os.path.isabs(value):
+                value = os.path.abspath(os.path.join(project_root, value))
+            # Ensure THUMBNAIL_QUALITY is an integer
+            if key == 'THUMBNAIL_QUALITY' and value is not None:
+                try:
+                    value = int(value)
+                except (ValueError, TypeError):
+                    pass
             current_app.config[key] = value
             
         return jsonify({'success': True})

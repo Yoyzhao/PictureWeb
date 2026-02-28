@@ -56,7 +56,15 @@ def generate_thumbnail(image_id, size_type='small'):
                 size = (300, 300)
                 
             img.thumbnail(size)
-            img.save(thumb_path, 'JPEG', quality=current_app.config.get('THUMBNAIL_QUALITY', 80))
+            
+            # Get quality setting and ensure it's an integer
+            quality = current_app.config.get('THUMBNAIL_QUALITY', 80)
+            try:
+                quality = int(quality)
+            except (ValueError, TypeError):
+                quality = 80
+                
+            img.save(thumb_path, 'JPEG', quality=quality)
             
             # Record in DB
             try:

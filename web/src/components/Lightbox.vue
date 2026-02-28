@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen } from '@element-plus/icons-vue'
+import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete } from '@element-plus/icons-vue'
 import type { Image } from '@/stores/image'
 import { useImageStore } from '@/stores/image'
+import { ElMessageBox, ElMessage } from 'element-plus'
 
 const props = defineProps<{
   visible: boolean
@@ -61,11 +62,50 @@ const handleFavorite = async () => {
   }
 }
 
+const handleDelete = async () => {
+  if (!props.image) return
+  
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这张图片吗？',
+      '提示',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    
+    const res = await imageStore.batchDeleteImages([props.image.id])
+    if (res.data.success) {
+      ElMessage.success('删除成功')
+      // If there's a next image, go to next, otherwise close
+      if (props.hasNext) {
+        emit('next')
+      } else if (props.hasPrev) {
+        emit('prev')
+      } else {
+        emit('close')
+      }
+      // Refresh the image list in the background
+      imageStore.fetchImages(true)
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败: ' + (error.response?.data?.error || error.message))
+    }
+  }
+}
+
 const handleKeydown = (e: KeyboardEvent) => {
   if (!props.visible) return
   if (e.key === 'Escape') emit('close')
   if (e.key === 'ArrowLeft' && props.hasPrev) emit('prev')
   if (e.key === 'ArrowRight' && props.hasNext) emit('next')
+  if (e.key === 'Delete') {
+    e.preventDefault()
+    handleDelete()
+  }
   if (e.key === 'ArrowUp') {
     e.preventDefault()
     scale.value = Math.min(5, scale.value + 0.2)
@@ -114,6 +154,9 @@ onUnmounted(() => {
           @click="handleFavorite"
         >
           <el-icon><Star /></el-icon>
+        </button>
+        <button title="删除" class="btn-delete" @click="handleDelete">
+          <el-icon><Delete /></el-icon>
         </button>
         <button title="关闭" class="close-btn" @click="emit('close')"><el-icon><Close /></el-icon></button>
       </div>
@@ -234,6 +277,11 @@ onUnmounted(() => {
 
 .lightbox-toolbar .btn-fav.active {
     color: #ff9800;
+}
+
+.lightbox-toolbar .btn-delete:hover {
+    background: rgba(245, 108, 108, 0.2);
+    color: #f56c6c;
 }
 
 .lightbox-toolbar button.disabled {
