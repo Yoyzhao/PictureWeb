@@ -1,0 +1,8 @@
+SERVER_PORT: 5000
+DB_PATH: "data/database.db"
+CACHE_DIR: "data/cache"
+LOG_LEVEL: "INFO"
+ANONYMOUS_ACCESS: true
+THUMBNAIL_QUALITY: 80
+SCAN_RECURSIVE: true
+SCAN_EXTENSIONS: ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff"

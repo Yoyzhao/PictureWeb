@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PictureWeb Prototype - 高性能图片管理系统</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <i class="fas fa-images logo-icon"></i>
+                <span class="logo-text">PictureWeb</span>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <div class="nav-group">
+                    <div class="nav-title">管理</div>
+                    <a href="#" class="nav-item active"><i class="fas fa-folder"></i> 文件夹</a>
+                    <a href="#" class="nav-item"><i class="fas fa-heart"></i> 收藏夹</a>
+                </div>
+                
+                <div class="nav-group">
+                    <div class="nav-title">文件夹列表</div>
+                    <div id="folder-list" class="folder-list">
+                        <!-- 动态生成 -->
+                        <div class="folder-item"><i class="far fa-folder"></i> 2024夏季旅游</div>
+                        <div class="folder-item"><i class="far fa-folder"></i> 设计素材</div>
+                        <div class="folder-item"><i class="far fa-folder"></i> 壁纸库</div>
+                    </div>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="avatar">G</div>
+                    <div class="user-details">
+                        <span class="username">匿名用户 (Guest)</span>
+                        <span class="user-role">只读权限</span>
+                    </div>
+                </div>
+                <button class="btn-login"><i class="fas fa-sign-in-alt"></i> 登录</button>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 顶部搜索栏 -->
+            <header class="top-bar">
+                <div class="search-container">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" placeholder="搜索文件名、文件夹或标签..." class="search-input">
+                </div>
+                <div class="action-buttons">
+                    <button class="btn-icon" title="上传图片"><i class="fas fa-plus"></i></button>
+                    <button class="btn-icon" title="设置"><i class="fas fa-cog"></i></button>
+                </div>
+            </header>
+
+            <!-- 瀑布流内容 -->
+            <div class="content-wrapper">
+                <div class="content-header">
+                    <h2 class="current-folder">所有图片</h2>
+                    <div class="view-options">
+                        <span class="item-count">共 128,450 张图片</span>
+                        <select class="sort-select">
+                            <option>按修改日期</option>
+                            <option>按文件名</option>
+                            <option>按大小</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="waterfall-container" class="waterfall">
+                    <!-- 动态生成图片卡片 -->
+                </div>
+
+                <!-- 底部状态栏 -->
+                <footer class="status-bar">
+                    <div class="status-info">
+                        <span>当前文件夹: <strong>壁纸库</strong></span>
+                        <span class="separator">|</span>
+                        <span>图片数量: <strong>2,450</strong></span>
+                        <span class="separator">|</span>
+                        <span>已选中: <strong id="selected-count">0</strong></span>
+                    </div>
+                    <div class="batch-actions" id="batch-actions" style="display: none;">
+                        <button class="btn-sm btn-primary">批量移动</button>
+                        <button class="btn-sm btn-danger">批量删除</button>
+                    </div>
+                </footer>
+            </div>
+        </main>
+    </div>
+
+    <!-- 图片详情灯箱 -->
+    <div id="lightbox" class="lightbox" style="display: none;">
+        <div class="lightbox-overlay"></div>
+        <div class="lightbox-content">
+            <img id="lightbox-img" src="" alt="">
+            <div class="lightbox-controls">
+                <button class="control-btn prev-btn"><i class="fas fa-chevron-left"></i></button>
+                <button class="control-btn next-btn"><i class="fas fa-chevron-right"></i></button>
+            </div>
+            <div class="lightbox-toolbar">
+                <button title="旋转"><i class="fas fa-sync-alt"></i></button>
+                <button title="裁剪"><i class="fas fa-crop-alt"></i></button>
+                <button title="重命名"><i class="fas fa-edit"></i></button>
+                <button title="收藏" class="btn-fav"><i class="far fa-heart"></i></button>
+                <button title="关闭" class="close-btn"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="image-meta">
+                <span id="meta-filename">image_001.jpg</span>
+                <span id="meta-resolution">3840 x 2160</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
