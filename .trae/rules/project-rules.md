@@ -24,7 +24,7 @@ description: 当时涉及到项目目录结构、项目开发调试、项目技�
         
     5.  /scripts：存放开发过程中的各类脚本，比如部署脚本，数据库脚本，测试脚本等，按文件夹分类。
         
-    6.  /build：存放构建后的产物，包括 Web 构建物、Android 和 iOS 应用、Windows 客户端等，按文件夹分类。
+    6.  /build：存放构建后的产物，包括 Web 构建物（dist）、Android (android)和 iOS(ios) 应用、Windows(windows) 客户端等，按文件夹分类。
         
     7.  /android：对于跨平台项目，存放安卓端代码。
         

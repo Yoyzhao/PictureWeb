@@ -1,15 +1,21 @@
 import os
 import yaml
-from flask import Flask
+from flask import Flask, send_from_directory
 from flask_cors import CORS
 
 def create_app(test_config=None):
     # create and configure the app
-    app = Flask(__name__, instance_relative_config=True)
+    # Static folder for frontend build
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    static_folder = os.path.join(project_root, 'web', 'dist')
+    
+    app = Flask(__name__, 
+                instance_relative_config=True,
+                static_folder=static_folder,
+                static_url_path='/')
     
     # Load configuration
     # config.yaml is in the project root (PictureWeb/config.yaml)
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     config_path = os.path.join(project_root, 'config.yaml')
     if os.path.exists(config_path):
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -55,5 +61,14 @@ def create_app(test_config=None):
     @app.route('/api/health')
     def health_check():
         return {'status': 'ok', 'message': 'PictureWeb Backend is running'}
+
+    # Serve the frontend build (catch-all for SPA)
+    @app.route('/', defaults={'path': ''})
+    @app.route('/<path:path>')
+    def serve(path):
+        if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+            return send_from_directory(app.static_folder, path)
+        else:
+            return send_from_directory(app.static_folder, 'index.html')
 
     return app

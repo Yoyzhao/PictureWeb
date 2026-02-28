@@ -1,0 +1,11 @@
+# PictureWeb 配置文件示例
+# 请将此文件复制并重命名为 config.yaml
+
+SERVER_PORT: 5000               # 后端服务端口
+DB_PATH: "data/database.db"     # SQLite 数据库文件的存放路径
+CACHE_DIR: "data/cache"         # 缩略图缓存的存储目录
+LOG_LEVEL: "INFO"               # 系统日志记录级别 (DEBUG, INFO, ERROR)
+ANONYMOUS_ACCESS: true          # 是否开启匿名访问
+THUMBNAIL_QUALITY: 80           # 缩略图生成的质量参数 (1-100)
+SCAN_RECURSIVE: true            # 是否递归扫描文件夹
+SCAN_EXTENSIONS: ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff" # 扫描的图片后缀名
