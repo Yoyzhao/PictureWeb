@@ -36,7 +36,6 @@ CREATE TABLE IF NOT EXISTS images (
     height INTEGER,
     format VARCHAR(10),
     folder_id INTEGER,
-    is_favorite BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (folder_id) REFERENCES folders(id)
@@ -45,6 +44,19 @@ CREATE TABLE IF NOT EXISTS images (
 CREATE INDEX IF NOT EXISTS idx_images_file_path ON images(file_path);
 CREATE INDEX IF NOT EXISTS idx_images_folder_id ON images(folder_id);
 CREATE INDEX IF NOT EXISTS idx_images_modified_time ON images(modified_time);
+
+-- User Favorites table
+CREATE TABLE IF NOT EXISTS user_favorites (
+    user_id INTEGER NOT NULL,
+    image_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, image_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_favorites_user_id ON user_favorites(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_favorites_image_id ON user_favorites(image_id);
 
 -- Tags table
 CREATE TABLE IF NOT EXISTS tags (

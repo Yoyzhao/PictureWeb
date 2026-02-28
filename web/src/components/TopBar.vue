@@ -32,7 +32,7 @@ const handleSettings = () => {
   if (authStore.user?.role === 'admin') {
     router.push('/admin')
   } else {
-    ElMessage.info('设置功能开发中...')
+    ElMessage.warning('需要管理员权限')
   }
 }
 </script>

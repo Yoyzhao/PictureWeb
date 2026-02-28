@@ -1,10 +1,17 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g
 from app.utils.db import get_db
 import yaml
 import os
 from werkzeug.security import generate_password_hash
+from app.routes.auth import login_required
 
 bp = Blueprint('admin', __name__, url_prefix='/api/admin')
+
+@bp.before_request
+@login_required
+def require_admin():
+    if g.user['role'] != 'admin':
+        return jsonify({'error': 'Admin permission required'}), 403
 
 # --- User Management ---
 
@@ -127,6 +134,14 @@ def add_permission():
     if not all([user_id, folder_id]) or not permission_types:
         return jsonify({'error': 'Missing required fields'}), 400
         
+    # Check user role
+    user = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+        
+    if user['role'] in ('admin', 'guest'):
+        return jsonify({'error': f"Cannot assign permissions to {user['role']} role"}), 403
+        
     try:
         for p_type in permission_types:
             # Using INSERT OR IGNORE to handle duplicates gracefully
@@ -142,6 +157,14 @@ def add_permission():
 @bp.route('/permissions/<int:id>', methods=['DELETE'])
 def delete_permission(id):
     db = get_db()
+    
+    # Check permission owner role before deleting
+    perm = db.execute("SELECT user_id FROM permissions WHERE id = ?", (id,)).fetchone()
+    if perm:
+        user = db.execute("SELECT role FROM users WHERE id = ?", (perm['user_id'],)).fetchone()
+        if user and user['role'] in ('admin', 'guest'):
+             return jsonify({'error': f"Cannot modify permissions for {user['role']} role"}), 403
+             
     db.execute("DELETE FROM permissions WHERE id = ?", (id,))
     db.commit()
     return jsonify({'success': True})

@@ -1,7 +1,8 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { ref, watch } from 'vue'
-import { getImages, updateImage, batchMoveImages, batchDeleteImages } from '../api'
+import { ref, shallowRef, watch } from 'vue'
+import { getImages, updateImage, batchMoveImages, batchDeleteImages, toggleImageFavorite } from '../api'
 import { useFolderStore } from './folder'
+import { useAuthStore } from './auth'
 import { ElMessage } from 'element-plus'
 
 export interface Image {
@@ -18,7 +19,7 @@ export interface Image {
 }
 
 export const useImageStore = defineStore('image', () => {
-  const images = ref<Image[]>([])
+  const images = shallowRef<Image[]>([])
   const total = ref(0)
   const page = ref(1)
   const perPage = ref(50)
@@ -30,7 +31,9 @@ export const useImageStore = defineStore('image', () => {
   const selectedImageIds = ref<number[]>([])
   
   const folderStore = useFolderStore()
+  const authStore = useAuthStore()
   const { currentFolderId } = storeToRefs(folderStore)
+  const { user, token } = storeToRefs(authStore)
 
   const fetchImages = async (reset = false) => {
     if (loading.value) return
@@ -52,10 +55,16 @@ export const useImageStore = defineStore('image', () => {
         q: searchQuery.value || undefined
       })
       
+      // Transform is_favorite to boolean if it comes as 0/1 from backend
+      const data = res.data.data.map((img: any) => ({
+        ...img,
+        is_favorite: !!img.is_favorite
+      }))
+
       if (reset) {
-        images.value = res.data.data
+        images.value = data
       } else {
-        images.value.push(...res.data.data)
+        images.value = [...images.value, ...data]
       }
       
       total.value = res.data.total
@@ -67,16 +76,29 @@ export const useImageStore = defineStore('image', () => {
     }
   }
 
-  // Watch folder, favorites, sort, or search change to reset images
-  watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () => {
+  // Watch folder, favorites, sort, search, or user auth change to reset images
+  watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery, user, token], () => {
     fetchImages(true)
   })
 
   const toggleFavorite = async (image: Image) => {
+    const authStore = useAuthStore()
+    if (!authStore.isLoggedIn || authStore.user?.role === 'guest') {
+      ElMessage.warning('请登录后使用收藏功能')
+      return
+    }
+
     try {
-      const newState = !image.is_favorite
-      await updateImage(image.id, { is_favorite: newState })
-      image.is_favorite = newState
+      const res = await toggleImageFavorite(image.id)
+      const newState = res.data.is_favorite
+      
+      // Update the image in the list
+      const index = images.value.findIndex(img => img.id === image.id)
+      if (index !== -1) {
+        const updatedImages = [...images.value]
+        updatedImages[index] = { ...updatedImages[index], is_favorite: newState }
+        images.value = updatedImages
+      }
       
       // If we are in favorites view and unfavorite, remove from list
       if (showOnlyFavorites.value && !newState) {

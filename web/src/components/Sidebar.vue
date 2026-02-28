@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import axios from 'axios'
+import { ref, onMounted, computed } from 'vue'
+import api from '@/api'
 import { useFolderStore } from '@/stores/folder'
 import { useAuthStore } from '@/stores/auth'
 import { useImageStore } from '@/stores/image'
 import { storeToRefs } from 'pinia'
-import { Folder, Plus, Refresh, Monitor, Star, SwitchButton, User } from '@element-plus/icons-vue'
+import { Folder, Plus, Refresh, Monitor, Star, SwitchButton, User, Setting } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 const folderStore = useFolderStore()
@@ -14,6 +14,9 @@ const imageStore = useImageStore()
 const { folders, currentFolderId } = storeToRefs(folderStore)
 const { isLoggedIn, user } = storeToRefs(authStore)
 const { showOnlyFavorites } = storeToRefs(imageStore)
+
+const isAdmin = computed(() => user.value?.role === 'admin')
+const isGuest = computed(() => user.value?.role === 'guest')
 
 const showAddDialog = ref(false)
 const showLoginDialog = ref(false)
@@ -41,7 +44,7 @@ const handleSelectFavorites = () => {
 
 const handleLogin = async () => {
   try {
-    const res = await axios.post('/api/auth/login', {
+    const res = await api.post('/auth/login', {
       username: loginForm.value.username,
       password: loginForm.value.password
     })
@@ -94,7 +97,7 @@ const handleAddFolder = async () => {
         <div class="nav-group">
             <div class="nav-title">
                 文件夹
-                <template v-if="isLoggedIn">
+                <template v-if="isLoggedIn && !isGuest">
                   <el-button type="primary" link :icon="Plus" @click.stop="showAddDialog = true" size="small" style="float: right; color: var(--text-secondary);"></el-button>
                   <el-button link :icon="Refresh" @click.stop="folderStore.fetchFolders()" size="small" style="float: right; color: var(--text-secondary); margin-right: 5px;"></el-button>
                 </template>

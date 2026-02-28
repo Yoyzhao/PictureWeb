@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, g
 from app.utils.db import get_db
 from app.services.scanner import scan_folder
+from app.routes.auth import login_required
 import os
 
 bp = Blueprint('folder', __name__, url_prefix='/api/folders')
@@ -12,7 +13,11 @@ def get_folders():
     return jsonify([dict(f) for f in folders])
 
 @bp.route('', methods=['POST'])
+@login_required
 def add_folder():
+    if g.user['role'] == 'guest':
+        return jsonify({'error': 'Guest users cannot add folders'}), 403
+        
     data = request.get_json()
     path = data.get('path')
     name = data.get('name', os.path.basename(path))
@@ -30,7 +35,7 @@ def add_folder():
         # Add folder
         cursor = db.execute(
             "INSERT INTO folders (path, name, user_id) VALUES (?, ?, ?)",
-            (path, name, 1) # TODO: Get actual user_id from auth
+            (path, name, g.user['id'])
         )
         folder_id = cursor.lastrowid
         db.commit()
@@ -43,7 +48,11 @@ def add_folder():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/<int:id>/scan', methods=['POST'])
+@login_required
 def rescan_folder(id):
+    if g.user['role'] == 'guest':
+        return jsonify({'error': 'Guest users cannot scan folders'}), 403
+        
     db = get_db()
     folder = db.execute("SELECT path FROM folders WHERE id = ?", (id,)).fetchone()
     

@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { onMounted, ref, watch, computed } from 'vue'
+import { onMounted, ref, watch, computed, nextTick } from 'vue'
 import { useImageStore } from '@/stores/image'
 import { useFolderStore } from '@/stores/folder'
+import { useAuthStore } from '@/stores/auth'
 import { storeToRefs } from 'pinia'
 import { useIntersectionObserver } from '@vueuse/core'
 import { Star, More, Loading, InfoFilled, Download, Delete, Rank } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
+import VirtualWaterfall from './common/VirtualWaterfall.vue'
 
 const imageStore = useImageStore()
 const { images, loading, total, showOnlyFavorites, sortBy, sortOrder, selectedImageIds } = storeToRefs(imageStore)
 const folderStore = useFolderStore()
 const { folders, currentFolderId } = storeToRefs(folderStore)
+const authStore = useAuthStore()
+const { user, isLoggedIn } = storeToRefs(authStore)
+
+const isGuest = computed(() => !isLoggedIn.value || user.value?.role === 'guest')
 
 const showMoveDialog = ref(false)
 const targetFolderId = ref<number | null>(null)
@@ -99,8 +105,6 @@ const showDetails = (img: any) => {
   showInfoDialog.value = true
 }
 
-const loadMoreTrigger = ref(null)
-
 const currentTitle = computed(() => {
   if (showOnlyFavorites.value) return '收藏夹'
   if (currentFolderId.value === undefined) return '所有照片'
@@ -111,15 +115,6 @@ const currentTitle = computed(() => {
 onMounted(() => {
   imageStore.fetchImages(true)
 })
-
-useIntersectionObserver(
-  loadMoreTrigger,
-  ([{ isIntersecting }]) => {
-    if (isIntersecting && !loading.value && images.value.length < total.value) {
-      imageStore.fetchImages()
-    }
-  }
-)
 
 const emit = defineEmits(['open-lightbox'])
 
@@ -151,9 +146,9 @@ const toggleSelection = (id: number) => {
         <div class="view-options">
             <span class="item-count">共 {{ total }} 张图片</span>
             <el-radio-group v-model="sortBy" size="small" class="sort-radio">
-                <el-radio-button label="modified_time">修改日期</el-radio-button>
-                <el-radio-button label="file_name">文件名</el-radio-button>
-                <el-radio-button label="file_size">大小</el-radio-button>
+                <el-radio-button value="modified_time">修改日期</el-radio-button>
+                <el-radio-button value="file_name">文件名</el-radio-button>
+                <el-radio-button value="file_size">大小</el-radio-button>
             </el-radio-group>
             <el-button 
               size="small" 
@@ -165,53 +160,60 @@ const toggleSelection = (id: number) => {
         </div>
     </div>
 
-    <div class="waterfall">
-      <div 
-        v-for="img in images" 
-        :key="img.id" 
-        class="img-card"
-        :class="{ selected: isSelected(img.id) }"
-        @click="handleCardClick(img, $event)"
-      >
-        <div class="card-checkbox" @click.stop="toggleSelection(img.id)">
-            <el-checkbox :model-value="isSelected(img.id)" size="large"></el-checkbox>
-        </div>
-        <img :src="getThumbnailUrl(img.id)" loading="lazy" :alt="img.file_name" />
-        <div class="card-overlay">
-            <button class="action-btn fav-btn" :class="{ active: img.is_favorite }" @click.stop="toggleFavorite(img)">
-                <el-icon><Star /></el-icon>
-            </button>
-            <el-dropdown trigger="click">
-                <button class="action-btn more-btn" @click.stop>
-                    <el-icon><More /></el-icon>
-                </button>
-                <template #dropdown>
-                    <el-dropdown-menu>
-                        <el-dropdown-item :icon="InfoFilled" @click="showDetails(img)">查看详情</el-dropdown-item>
-                        <el-dropdown-item :icon="Download" @click="handleDownload(img)">下载原图</el-dropdown-item>
-                        <el-dropdown-item :icon="Rank" @click="openMoveDialog(img.id)">移动图片</el-dropdown-item>
-                        <el-dropdown-item :icon="Delete" @click="handleSingleDelete(img)" divided style="color: #f56c6c">删除图片</el-dropdown-item>
-                    </el-dropdown-menu>
-                </template>
-            </el-dropdown>
-        </div>
-        <div class="img-info">
-          <div class="img-name">{{ img.file_name }}</div>
-          <div class="img-meta">
-            {{ img.width }} x {{ img.height }} | {{ (img.file_size / 1024 / 1024).toFixed(2) }} MB | 
-            {{ isNaN(new Date(img.modified_time).getTime()) ? (new Date(img.modified_time * 1000).toLocaleDateString()) : (new Date(img.modified_time).toLocaleDateString()) }}
+    <VirtualWaterfall 
+      :items="images" 
+      :gap="16" 
+      :buffer="1000"
+      @load-more="imageStore.fetchImages()"
+    >
+      <template #default="{ item: img }">
+        <div 
+          class="img-card"
+          :class="{ selected: isSelected(img.id) }"
+          @click="handleCardClick(img, $event)"
+        >
+          <div class="card-checkbox" @click.stop="toggleSelection(img.id)">
+              <el-checkbox :model-value="isSelected(img.id)" size="large"></el-checkbox>
+          </div>
+          <img :src="getThumbnailUrl(img.id)" loading="lazy" :alt="img.file_name" />
+          <div class="card-overlay">
+              <button v-if="isLoggedIn && !isGuest" class="action-btn fav-btn" :class="{ active: img.is_favorite }" @click.stop="toggleFavorite(img)">
+                  <el-icon><Star /></el-icon>
+              </button>
+              <el-dropdown trigger="click">
+                  <button class="action-btn more-btn" @click.stop>
+                      <el-icon><More /></el-icon>
+                  </button>
+                  <template #dropdown>
+                      <el-dropdown-menu>
+                          <el-dropdown-item :icon="InfoFilled" @click="showDetails(img)">查看详情</el-dropdown-item>
+                          <el-dropdown-item :icon="Download" @click="handleDownload(img)">下载原图</el-dropdown-item>
+                          <el-dropdown-item v-if="!isGuest" :icon="Rank" @click="openMoveDialog(img.id)">移动图片</el-dropdown-item>
+                          <el-dropdown-item v-if="!isGuest" :icon="Delete" @click="handleSingleDelete(img)" divided style="color: #f56c6c">删除图片</el-dropdown-item>
+                      </el-dropdown-menu>
+                  </template>
+              </el-dropdown>
+          </div>
+          <div class="img-info">
+            <div class="img-name">{{ img.file_name }}</div>
+            <div class="img-meta">
+              {{ img.width }} x {{ img.height }} | {{ (img.file_size / 1024 / 1024).toFixed(2) }} MB | 
+              {{ isNaN(new Date(img.modified_time).getTime()) ? (new Date(img.modified_time * 1000).toLocaleDateString()) : (new Date(img.modified_time).toLocaleDateString()) }}
+            </div>
           </div>
         </div>
-      </div>
-    </div>
+      </template>
+    </VirtualWaterfall>
 
     <div v-if="images.length === 0 && !loading" class="empty-state">
       <el-empty :description="showOnlyFavorites ? '收藏夹还是空的' : '当前文件夹下没有照片'"></el-empty>
     </div>
     
-    <div ref="loadMoreTrigger" class="load-more">
-      <el-icon v-if="loading" class="is-loading"><Loading /></el-icon>
-      <span v-else-if="images.length >= total && total > 0">没有更多图片了</span>
+    <div v-if="loading" class="load-more">
+      <el-icon class="is-loading"><Loading /></el-icon>
+    </div>
+    <div v-else-if="images.length >= total && total > 0" class="load-more">
+      <span>没有更多图片了</span>
     </div>
 
     <footer class="status-bar">
@@ -222,7 +224,7 @@ const toggleSelection = (id: number) => {
             <span class="separator">|</span>
             <span>已选中: <strong>{{ selectedImageIds.length }}</strong></span>
         </div>
-        <div class="batch-actions" v-if="selectedImageIds.length > 0">
+        <div class="batch-actions" v-if="selectedImageIds.length > 0 && !isGuest">
             <el-button size="small" type="primary" link @click="imageStore.selectAll()">全选</el-button>
             <el-button size="small" type="primary" link @click="imageStore.clearSelection()">取消</el-button>
             <el-divider direction="vertical" />
@@ -389,25 +391,17 @@ const toggleSelection = (id: number) => {
     background-color: var(--primary);
 }
 
-.waterfall {
-    column-count: 5;
-    column-gap: 16px;
-}
-
-@media (max-width: 1600px) { .waterfall { column-count: 4; } }
-@media (max-width: 1200px) { .waterfall { column-count: 3; } }
-@media (max-width: 800px) { .waterfall { column-count: 2; } }
+/* Removed .waterfall column layout in favor of VirtualWaterfall */
 
 .img-card {
-    break-inside: avoid;
-    margin-bottom: 16px;
     background: var(--bg-card);
     border-radius: 8px;
     overflow: hidden;
     position: relative;
     cursor: pointer;
-    transition: transform 0.2s;
+    transition: transform 0.2s, border-color 0.2s;
     border: 1px solid transparent;
+    width: 100%; /* Important: card takes full width of its absolute container */
 }
 
 .img-card:hover {

@@ -1,14 +1,50 @@
-from flask import Blueprint, request, jsonify, send_file, abort
+from flask import Blueprint, request, jsonify, send_file, abort, g
 from app.utils.db import get_db
 from app.services.thumbnail import generate_thumbnail
+from app.routes.auth import get_current_user, login_required
 import os
 import shutil
 from send2trash import send2trash
 
 bp = Blueprint('image', __name__, url_prefix='/api/images')
 
+@bp.route('/<int:id>/favorite', methods=['POST'])
+@login_required
+def toggle_favorite(id):
+    if g.user['role'] == 'guest':
+        return jsonify({'error': 'Guest users cannot favorite images'}), 403
+        
+    db = get_db()
+    user_id = g.user['id']
+    
+    # Check if already favorited
+    fav = db.execute(
+        "SELECT 1 FROM user_favorites WHERE user_id = ? AND image_id = ?",
+        (user_id, id)
+    ).fetchone()
+    
+    if fav:
+        db.execute(
+            "DELETE FROM user_favorites WHERE user_id = ? AND image_id = ?",
+            (user_id, id)
+        )
+        is_favorite = False
+    else:
+        db.execute(
+            "INSERT INTO user_favorites (user_id, image_id) VALUES (?, ?)",
+            (user_id, id)
+        )
+        is_favorite = True
+        
+    db.commit()
+    return jsonify({'success': True, 'is_favorite': is_favorite})
+
 @bp.route('/batch/move', methods=['POST'])
+@login_required
 def batch_move_images():
+    if g.user['role'] == 'guest':
+        return jsonify({'error': 'Guest users cannot move images'}), 403
+        
     data = request.json
     image_ids = data.get('image_ids', [])
     target_folder_id = data.get('target_folder_id')
@@ -69,7 +105,11 @@ def batch_move_images():
     })
 
 @bp.route('/batch/delete', methods=['POST'])
+@login_required
 def batch_delete_images():
+    if g.user['role'] == 'guest':
+        return jsonify({'error': 'Guest users cannot delete images'}), 403
+        
     data = request.json
     image_ids = data.get('image_ids', [])
     
@@ -123,6 +163,8 @@ def batch_delete_images():
 @bp.route('', methods=['GET'])
 def get_images():
     db = get_db()
+    user = get_current_user()
+    user_id = user['id'] if user else None
     
     # Pagination
     page = request.args.get('page', 1, type=int)
@@ -145,42 +187,72 @@ def get_images():
     if sort_order.upper() not in ['ASC', 'DESC']:
         sort_order = 'DESC'
     
-    query = "SELECT * FROM images"
+    # Base query with LEFT JOIN to get favorite status for the current user
+    if user_id:
+        query = """
+            SELECT i.*, 
+                   CASE WHEN uf.user_id IS NOT NULL THEN 1 ELSE 0 END as is_fav
+            FROM images i
+            LEFT JOIN user_favorites uf ON i.id = uf.image_id AND uf.user_id = ?
+        """
+        params = [user_id]
+        
+        # We need to add user_id AGAIN for any subsequent parameter bindings if they exist?
+        # Actually, let's restructure this to be safer.
+        # The first parameter is for the LEFT JOIN condition.
+    else:
+        query = "SELECT i.*, 0 as is_fav FROM images i"
+        params = []
+    
     conditions = []
-    params = []
     
     if folder_id:
-        conditions.append("folder_id = ?")
+        conditions.append("i.folder_id = ?")
         params.append(folder_id)
         
-    if is_favorite == 'true':
-        conditions.append("is_favorite = 1")
-    elif is_favorite == 'false':
-        conditions.append("is_favorite = 0")
+    if is_favorite == 'true' and user_id:
+        conditions.append("uf.user_id IS NOT NULL")
+    elif is_favorite == 'false' and user_id:
+        conditions.append("uf.user_id IS NULL")
         
     if q:
-        conditions.append("file_name LIKE ?")
+        conditions.append("i.file_name LIKE ?")
         search_term = f"%{q}%"
         params.append(search_term)
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
         
-    # Count total
-    count_query = f"SELECT COUNT(*) FROM ({query})"
-    total = db.execute(count_query, params).fetchone()[0]
+    # Count total - use the query WITH conditions but WITHOUT limits
+    # CRITICAL FIX: The count query needs the JOIN to filter by favorites correctly if requested
+    # AND it needs the same parameters.
+    # But `params` already contains [user_id, folder_id, ...].
+    # When we wrap it in `SELECT COUNT(*) FROM (...)`, the inner query needs its params.
+    count_sql = f"SELECT COUNT(*) FROM ({query})"
+    
+    # We execute count_sql with the current params list
+    total = db.execute(count_sql, params).fetchone()[0]
     
     # Sorting
-    query += f" ORDER BY {sort_by} {sort_order}"
+    query += f" ORDER BY i.{sort_by} {sort_order}"
     
     # Pagination
     query += " LIMIT ? OFFSET ?"
-    params.extend([per_page, offset])
+    # We need a NEW params list for the final query that includes limit/offset
+    final_params = params + [per_page, offset]
     
-    images = db.execute(query, params).fetchall()
+    images = db.execute(query, final_params).fetchall()
+    
+    # Process images to map is_fav to is_favorite
+    result_data = []
+    for img in images:
+        img_dict = dict(img)
+        # Map is_fav to is_favorite, defaulting to 0/False if not present
+        img_dict['is_favorite'] = bool(img_dict.get('is_fav', 0))
+        result_data.append(img_dict)
     
     return jsonify({
-        'data': [dict(img) for img in images],
+        'data': result_data,
         'total': total,
         'page': page,
         'per_page': per_page
@@ -189,18 +261,48 @@ def get_images():
 @bp.route('/<int:id>', methods=['GET'])
 def get_image(id):
     db = get_db()
-    image = db.execute("SELECT * FROM images WHERE id = ?", (id,)).fetchone()
+    user = get_current_user()
+    user_id = user['id'] if user else None
+    
+    if user_id:
+        query = """
+            SELECT i.*, 
+                   CASE WHEN uf.user_id IS NOT NULL THEN 1 ELSE 0 END as is_fav
+            FROM images i
+            LEFT JOIN user_favorites uf ON i.id = uf.image_id AND uf.user_id = ?
+            WHERE i.id = ?
+        """
+        image = db.execute(query, (user_id, id)).fetchone()
+    else:
+        image = db.execute("SELECT *, 0 as is_fav FROM images WHERE id = ?", (id,)).fetchone()
+        
     if not image:
         return jsonify({'error': 'Image not found'}), 404
-    return jsonify(dict(image))
+        
+    img_dict = dict(image)
+    img_dict['is_favorite'] = bool(img_dict.get('is_fav', 0))
+    return jsonify(img_dict)
 
 @bp.route('/<int:id>', methods=['PATCH'])
 def update_image(id):
     db = get_db()
     data = request.json
     
-    if 'is_favorite' in data:
-        db.execute("UPDATE images SET is_favorite = ? WHERE id = ?", (1 if data['is_favorite'] else 0, id))
+    fields = []
+    params = []
+    
+    if 'folder_id' in data:
+        fields.append("folder_id = ?")
+        params.append(data['folder_id'])
+        
+    if 'file_name' in data:
+        fields.append("file_name = ?")
+        params.append(data['file_name'])
+        
+    if fields:
+        params.append(id)
+        query = f"UPDATE images SET {', '.join(fields)} WHERE id = ?"
+        db.execute(query, params)
         db.commit()
         
     return jsonify({'success': True})

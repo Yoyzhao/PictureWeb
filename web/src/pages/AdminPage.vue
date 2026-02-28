@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import axios from 'axios'
+import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Folder, Setting, Plus, Delete, Edit } from '@element-plus/icons-vue'
 
@@ -27,7 +27,7 @@ const permissionForm = ref({
 
 const fetchUsers = async () => {
   try {
-    const res = await axios.get('/api/admin/users')
+    const res = await api.get('/admin/users')
     users.value = res.data
   } catch (err) {
     ElMessage.error('获取用户列表失败')
@@ -36,7 +36,7 @@ const fetchUsers = async () => {
 
 const fetchFolders = async () => {
   try {
-    const res = await axios.get('/api/admin/folders')
+    const res = await api.get('/admin/folders')
     folders.value = res.data
   } catch (err) {
     ElMessage.error('获取文件夹列表失败')
@@ -45,7 +45,7 @@ const fetchFolders = async () => {
 
 const fetchPermissions = async () => {
   try {
-    const res = await axios.get('/api/admin/permissions')
+    const res = await api.get('/admin/permissions')
     permissions.value = res.data
   } catch (err) {
     ElMessage.error('获取权限列表失败')
@@ -54,7 +54,7 @@ const fetchPermissions = async () => {
 
 const fetchSettings = async () => {
   try {
-    const res = await axios.get('/api/admin/settings')
+    const res = await api.get('/admin/settings')
     settings.value = res.data
   } catch (err) {
     ElMessage.error('获取系统设置失败')
@@ -85,7 +85,7 @@ const saveFolder = async () => {
       ElMessage.warning('请输入物理路径')
       return
     }
-    await axios.post('/api/folders', folderForm.value)
+    await api.post('/folders', folderForm.value)
     ElMessage.success('文件夹已添加')
     showFolderDialog.value = false
     fetchFolders()
@@ -97,7 +97,7 @@ const saveFolder = async () => {
 const handleScanFolder = async (id: number) => {
   try {
     ElMessage.info('扫描任务已提交，请稍候...')
-    const res = await axios.post(`/api/folders/${id}/scan`)
+    const res = await api.post(`/folders/${id}/scan`)
     const { processed, removed, total } = res.data
     
     ElMessageBox.alert(
@@ -124,7 +124,7 @@ const handleDeleteFolder = async (id: number) => {
       cancelButtonText: '取消',
       type: 'warning'
     })
-    await axios.delete(`/api/admin/folders/${id}`)
+    await api.delete(`/admin/folders/${id}`)
     ElMessage.success('文件夹已删除')
     fetchFolders()
     fetchPermissions()
@@ -148,10 +148,10 @@ const handleEditUser = (user: any) => {
 const saveUser = async () => {
   try {
     if (userForm.value.id) {
-      await axios.patch(`/api/admin/users/${userForm.value.id}`, userForm.value)
+      await api.patch(`/admin/users/${userForm.value.id}`, userForm.value)
       ElMessage.success('用户已更新')
     } else {
-      await axios.post('/api/admin/users', userForm.value)
+      await api.post('/admin/users', userForm.value)
       ElMessage.success('用户已添加')
     }
     showUserDialog.value = false
@@ -164,7 +164,7 @@ const saveUser = async () => {
 const deleteUser = async (id: number) => {
   try {
     await ElMessageBox.confirm('确定要删除此用户吗？', '提示', { type: 'warning' })
-    await axios.delete(`/api/admin/users/${id}`)
+    await api.delete(`/admin/users/${id}`)
     ElMessage.success('用户已删除')
     fetchUsers()
   } catch (err) {}
@@ -177,21 +177,30 @@ const handleAddPermission = () => {
 
 const savePermission = async () => {
   try {
-    await axios.post('/api/admin/permissions', permissionForm.value)
-    ElMessage.success('权限已分配')
+    await api.post('/admin/permissions', permissionForm.value)
+    ElMessage.success('权限已添加')
     showPermissionDialog.value = false
     fetchPermissions()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.error || '操作失败')
+    ElMessage.error(err.response?.data?.error || '添加失败')
   }
+}
+
+const deletePermission = async (id: number) => {
+  try {
+    await ElMessageBox.confirm('确定要删除此权限吗？', '提示', { type: 'warning' })
+    await api.delete(`/admin/permissions/${id}`)
+    ElMessage.success('权限已删除')
+    fetchPermissions()
+  } catch (err) {}
 }
 
 const saveSettings = async () => {
   try {
-    await axios.post('/api/admin/settings', settings.value)
-    ElMessage.success('系统设置已保存，请手动重启服务以生效')
+    await api.post('/admin/settings', settings.value)
+    ElMessage.success('设置已保存')
   } catch (err) {
-    ElMessage.error('保存失败')
+    ElMessage.error('保存设置失败')
   }
 }
 </script>
@@ -264,7 +273,7 @@ const saveSettings = async () => {
             </el-table-column>
             <el-table-column label="操作" width="100">
               <template #default="{ row }">
-                <el-button :icon="Delete" size="small" type="danger" @click="async () => { await axios.delete(`/api/admin/permissions/${row.id}`); fetchPermissions(); }" />
+                <el-button :icon="Delete" size="small" type="danger" @click="deletePermission(row.id)" />
               </template>
             </el-table-column>
           </el-table>
@@ -339,7 +348,13 @@ const saveSettings = async () => {
       <el-form :model="permissionForm" label-width="80px">
         <el-form-item label="用户">
           <el-select v-model="permissionForm.user_id" placeholder="选择用户">
-            <el-option v-for="u in users" :key="u.id" :label="u.username" :value="u.id" />
+            <el-option 
+              v-for="u in users" 
+              :key="u.id" 
+              :label="u.username" 
+              :value="u.id"
+              :disabled="u.role === 'admin' || u.role === 'guest'"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="文件夹">
