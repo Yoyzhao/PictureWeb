@@ -206,6 +206,19 @@ def get_images():
     
     conditions = []
     
+    # Permission check: User must have access to the folder the image belongs to
+    if not user or user['role'] != 'admin':
+        # Non-admins only see images in folders they have 'read' permission for OR public folders
+        user_id_val = user['id'] if user else -1
+        conditions.append("""
+            i.folder_id IN (
+                SELECT id FROM folders WHERE is_public = 1
+                UNION
+                SELECT folder_id FROM permissions WHERE user_id = ? AND permission_type = 'read'
+            )
+        """)
+        params.append(user_id_val)
+
     if folder_id:
         conditions.append("i.folder_id = ?")
         params.append(folder_id)

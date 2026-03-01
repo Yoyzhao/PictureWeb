@@ -70,12 +70,30 @@ onMounted(() => {
 
 const showFolderDialog = ref(false)
 const folderForm = ref({
+  id: null as number | null,
   path: '',
-  name: ''
+  name: '',
+  is_public: false,
+  visible_users: [] as number[]
 })
 
 const handleAddFolder = () => {
-  folderForm.value = { path: '', name: '' }
+  folderForm.value = { id: null, path: '', name: '', is_public: false, visible_users: [] }
+  showFolderDialog.value = true
+}
+
+const handleEditFolder = (folder: any) => {
+  // Get visible users from permissions
+  const folderPermissions = permissions.value.filter(p => p.folder_id === folder.id && p.permission_type === 'read')
+  const visibleUsers = folderPermissions.map(p => p.user_id)
+  
+  folderForm.value = {
+    id: folder.id,
+    path: folder.path,
+    name: folder.name,
+    is_public: !!folder.is_public,
+    visible_users: visibleUsers
+  }
   showFolderDialog.value = true
 }
 
@@ -85,12 +103,72 @@ const saveFolder = async () => {
       ElMessage.warning('请输入物理路径')
       return
     }
-    await api.post('/folders', folderForm.value)
-    ElMessage.success('文件夹已添加')
+
+    const payload = {
+      path: folderForm.value.path,
+      name: folderForm.value.name.trim() || undefined,
+      is_public: folderForm.value.is_public
+    }
+
+    let folderId: number
+    if (folderForm.value.id) {
+      await api.patch(`/folders/${folderForm.value.id}`, payload)
+      folderId = folderForm.value.id
+      ElMessage.success('文件夹已更新')
+    } else {
+      const res = await api.post('/folders', payload)
+      folderId = res.data.id
+      ElMessage.success('文件夹已添加')
+    }
+    
+    // Sync permissions for selected users
+    if (!folderForm.value.is_public) {
+      // 1. Get current permissions
+      const currentPerms = permissions.value.filter(p => p.folder_id === folderId && p.permission_type === 'read')
+      const currentUserIds = currentPerms.map(p => p.user_id)
+      
+      // 2. Remove permissions for users no longer selected
+      const usersToRemove = currentPerms.filter(p => !folderForm.value.visible_users.includes(p.user_id))
+      for (const p of usersToRemove) {
+        await api.delete(`/admin/permissions/${p.id}`)
+      }
+      
+      // 3. Add permissions for newly selected users
+      const usersToAdd = folderForm.value.visible_users.filter(id => !currentUserIds.includes(id))
+      for (const userId of usersToAdd) {
+        await api.post('/admin/permissions', {
+          user_id: userId,
+          folder_id: folderId,
+          permission_types: ['read']
+        })
+      }
+    } else {
+      // If public, remove all existing read permissions for this folder
+      const currentPerms = permissions.value.filter(p => p.folder_id === folderId && p.permission_type === 'read')
+      for (const p of currentPerms) {
+        await api.delete(`/admin/permissions/${p.id}`)
+      }
+    }
+    
     showFolderDialog.value = false
     fetchFolders()
+    fetchPermissions()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.error || '添加失败')
+    ElMessage.error(err.response?.data?.error || '操作失败')
+  }
+}
+
+const toggleFolderPublic = async (row: any) => {
+  try {
+    await api.patch(`/folders/${row.id}`, { is_public: row.is_public })
+    ElMessage.success(`文件夹已设置为${row.is_public ? '公开' : '私有'}`)
+    if (row.is_public) {
+      // If changed to public, refresh permissions as they might have been cleared or need sync
+      fetchPermissions()
+    }
+  } catch (err: any) {
+    row.is_public = !row.is_public // Revert on failure
+    ElMessage.error(err.response?.data?.error || '操作失败')
   }
 }
 
@@ -207,11 +285,9 @@ const saveSettings = async () => {
 
 <template>
   <div class="admin-container">
-    <div class="admin-header">
-      <h1>系统管理</h1>
-      <router-link to="/" class="back-link">返回首页</router-link>
+    <div class="content-header">
+      <h1 class="current-folder">系统管理</h1>
     </div>
-
     <el-tabs v-model="activeTab" class="admin-tabs">
       <el-tab-pane label="文件夹管理" name="folders">
         <div class="tab-content">
@@ -221,9 +297,15 @@ const saveSettings = async () => {
           <el-table :data="folders" style="width: 100%">
             <el-table-column prop="name" label="名称" />
             <el-table-column prop="path" label="物理路径" />
-            <el-table-column label="操作" width="200">
+            <el-table-column label="公开状态" width="100">
+              <template #default="{ row }">
+                <el-switch v-model="row.is_public" @change="toggleFolderPublic(row)" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="220">
               <template #default="{ row }">
                 <el-button-group>
+                  <el-button type="primary" size="small" :icon="Edit" @click="handleEditFolder(row)">编辑</el-button>
                   <el-button type="success" size="small" @click="handleScanFolder(row.id)">扫描</el-button>
                   <el-button type="danger" size="small" :icon="Delete" @click="handleDeleteFolder(row.id)">删除</el-button>
                 </el-button-group>
@@ -377,7 +459,7 @@ const saveSettings = async () => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showFolderDialog" title="添加文件夹" width="500px">
+    <el-dialog v-model="showFolderDialog" :title="folderForm.id ? '编辑文件夹' : '添加文件夹'" width="500px">
       <el-form :model="folderForm" label-width="100px">
         <el-form-item label="物理路径">
           <el-input v-model="folderForm.path" placeholder="例如: D:\Photos" />
@@ -385,6 +467,22 @@ const saveSettings = async () => {
         </el-form-item>
         <el-form-item label="显示名称">
           <el-input v-model="folderForm.name" placeholder="留空则使用文件夹名" />
+        </el-form-item>
+        <el-form-item label="公开访问">
+          <el-switch v-model="folderForm.is_public" />
+          <div class="form-tip">开启后所有人（包括游客）都可查看</div>
+        </el-form-item>
+        <el-form-item label="可见用户" v-if="!folderForm.is_public">
+          <el-select v-model="folderForm.visible_users" multiple placeholder="选择可见的用户">
+            <el-option 
+              v-for="u in users" 
+              :key="u.id" 
+              :label="u.username" 
+              :value="u.id"
+              :disabled="u.role === 'admin' || u.role === 'guest'"
+            />
+          </el-select>
+          <div class="form-tip">管理员默认可见</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -397,31 +495,34 @@ const saveSettings = async () => {
 
 <style scoped>
 .admin-container {
-  padding: 40px;
-  max-width: 1200px;
-  margin: 0 auto;
-  min-height: 100vh;
+  padding: 24px;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
   background: var(--bg-main);
   color: var(--text-primary);
-}
-
-.admin-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 30px;
+  flex-direction: column;
 }
 
-.back-link {
-  color: var(--primary);
-  text-decoration: none;
+.content-header {
+  margin-bottom: 24px;
+  flex-shrink: 0;
+}
+
+.current-folder {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
 }
 
 .admin-tabs {
   background: var(--bg-card);
-  padding: 20px;
-  border-radius: 8px;
+  padding: 24px;
+  border-radius: 12px;
   border: 1px solid var(--border-color);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  flex: 1;
 }
 
 .tab-content {

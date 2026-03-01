@@ -9,11 +9,11 @@ import { Folder, Plus, Refresh, Monitor, Star, SwitchButton, User, Setting } fro
 import { ElMessage } from 'element-plus'
 
 const folderStore = useFolderStore()
-const authStore = useAuthStore()
-const imageStore = useImageStore()
 const { folders, currentFolderId } = storeToRefs(folderStore)
+const authStore = useAuthStore()
 const { isLoggedIn, user } = storeToRefs(authStore)
-const { showOnlyFavorites } = storeToRefs(imageStore)
+const imageStore = useImageStore()
+const { showOnlyFavorites, showAdminView } = storeToRefs(imageStore)
 
 const isAdmin = computed(() => user.value?.role === 'admin')
 const isGuest = computed(() => user.value?.role === 'guest')
@@ -33,12 +33,20 @@ onMounted(() => {
 })
 
 const handleSelect = (id: number | undefined) => {
+  showAdminView.value = false
   showOnlyFavorites.value = false
   folderStore.selectFolder(id as any)
 }
 
 const handleSelectFavorites = () => {
+  showAdminView.value = false
   showOnlyFavorites.value = true
+  folderStore.selectFolder(undefined as any)
+}
+
+const handleSelectAdmin = () => {
+  showAdminView.value = true
+  showOnlyFavorites.value = false
   folderStore.selectFolder(undefined as any)
 }
 
@@ -52,6 +60,9 @@ const handleLogin = async () => {
     const { user: loggedInUser, token } = res.data
     await authStore.login(loggedInUser.username, loggedInUser.role, token)
     
+    // 登录成功后刷新文件夹列表
+    await folderStore.fetchFolders()
+    
     ElMessage.success('登录成功')
     showLoginDialog.value = false
   } catch (err: any) {
@@ -59,9 +70,12 @@ const handleLogin = async () => {
   }
 }
 
-const handleLogout = () => {
-  authStore.logout()
-  ElMessage.info('已退出登录')
+const handleLogout = async () => {
+  showAdminView.value = false
+  await authStore.logout()
+  // 登出后刷新文件夹列表（只显示公开文件夹）
+  await folderStore.fetchFolders()
+  ElMessage.success('已退出登录')
 }
 
 const handleAddFolder = async () => {
@@ -83,15 +97,15 @@ const handleAddFolder = async () => {
     <nav class="sidebar-nav">
         <div class="nav-group">
             <div class="nav-title">管理</div>
-            <a href="#" class="nav-item" :class="{ active: currentFolderId === undefined && !showOnlyFavorites }" @click.prevent="handleSelect(undefined)">
+            <a href="#" class="nav-item" :class="{ active: currentFolderId === undefined && !showOnlyFavorites && !showAdminView }" @click.prevent="handleSelect(undefined)">
                 <el-icon><Folder /></el-icon> 所有照片
             </a>
             <a v-if="isLoggedIn" href="#" class="nav-item" :class="{ active: showOnlyFavorites }" @click.prevent="handleSelectFavorites">
                 <el-icon><Star /></el-icon> 收藏夹
             </a>
-            <router-link v-if="isLoggedIn && user?.role === 'admin'" to="/admin" class="nav-item">
+            <a v-if="isLoggedIn && user?.role === 'admin'" href="#" class="nav-item" :class="{ active: showAdminView }" @click.prevent="handleSelectAdmin">
                 <el-icon><Setting /></el-icon> 系统管理
-            </router-link>
+            </a>
         </div>
         
         <div class="nav-group">

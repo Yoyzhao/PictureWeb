@@ -2,13 +2,14 @@
 import Sidebar from '@/components/Sidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import ImageGrid from '@/components/ImageGrid.vue'
+import AdminPage from '@/pages/AdminPage.vue'
 import Lightbox from '@/components/Lightbox.vue'
 import { ref, computed } from 'vue'
 import { useImageStore } from '@/stores/image'
 import { storeToRefs } from 'pinia'
 
 const imageStore = useImageStore()
-const { images } = storeToRefs(imageStore)
+const { images, showAdminView } = storeToRefs(imageStore)
 
 const showLightbox = ref(false)
 const currentImageId = ref<number | null>(null)
@@ -51,7 +52,8 @@ const handleNext = () => {
     <Sidebar />
     <main class="main-content">
       <TopBar />
-      <ImageGrid @open-lightbox="handleOpenLightbox" />
+      <ImageGrid v-if="!showAdminView" @open-lightbox="handleOpenLightbox" />
+      <AdminPage v-else />
     </main>
     
     <Lightbox 

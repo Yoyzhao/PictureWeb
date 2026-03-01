@@ -10,7 +10,7 @@ import { useTheme } from '@/composables/useTheme'
 
 const authStore = useAuthStore()
 const imageStore = useImageStore()
-const { searchQuery } = storeToRefs(imageStore)
+const { searchQuery, showAdminView } = storeToRefs(imageStore)
 const router = useRouter()
 
 const { isDark, toggleTheme } = useTheme()
@@ -30,7 +30,7 @@ const handleUpload = () => {
 
 const handleSettings = () => {
   if (authStore.user?.role === 'admin') {
-    router.push('/admin')
+    showAdminView.value = !showAdminView.value
   } else {
     ElMessage.warning('需要管理员权限')
   }
