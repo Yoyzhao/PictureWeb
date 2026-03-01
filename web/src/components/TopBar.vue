@@ -93,8 +93,28 @@ const handleSettings = () => {
 }
 
 .search-container {
-    flex: 0 0 400px;
+    flex: 1;
+    max-width: 400px;
     position: relative;
+    min-width: 100px;
+}
+
+@media (max-width: 768px) {
+    .top-bar {
+        padding: 0 12px;
+    }
+
+    .search-container {
+        max-width: 200px;
+    }
+
+    .theme-toggle {
+        margin-right: 4px;
+    }
+
+    .btn-icon {
+        margin-left: 8px;
+    }
 }
 
 .search-icon {
@@ -123,7 +143,9 @@ const handleSettings = () => {
 
 .action-buttons {
     display: flex;
-    gap: 12px;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
 }
 
 .btn-icon {
@@ -131,7 +153,6 @@ const handleSettings = () => {
     border: none;
     color: var(--text-primary);
     font-size: 18px;
-    margin-left: 16px;
     cursor: pointer;
     display: flex;
     align-items: center;

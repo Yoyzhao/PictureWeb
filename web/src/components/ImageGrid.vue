@@ -10,7 +10,7 @@ import { ElMessageBox, ElMessage } from 'element-plus'
 import VirtualWaterfall from './common/VirtualWaterfall.vue'
 
 const imageStore = useImageStore()
-const { images, loading, total, showOnlyFavorites, sortBy, sortOrder, selectedImageIds } = storeToRefs(imageStore)
+const { images, loading, total, showOnlyFavorites, sortBy, sortOrder, selectedImageIds, gridSize } = storeToRefs(imageStore)
 const folderStore = useFolderStore()
 const { folders, currentFolderId } = storeToRefs(folderStore)
 const authStore = useAuthStore()
@@ -125,6 +125,14 @@ const emit = defineEmits(['open-lightbox'])
 
 const getThumbnailUrl = (id: number) => `/api/images/${id}/thumbnail?size=small`
 
+const columnWidthMap = {
+  small: 180,
+  medium: 280,
+  large: 400
+}
+
+const currentColumnWidth = computed(() => columnWidthMap[gridSize.value])
+
 const toggleFavorite = (img: any) => {
   imageStore.toggleFavorite(img)
 }
@@ -150,6 +158,12 @@ const toggleSelection = (id: number) => {
         <h2 class="current-folder">{{ currentTitle }}</h2>
         <div class="view-options">
             <span class="item-count">共 {{ total }} 张图片</span>
+            <el-radio-group v-model="gridSize" size="small" class="grid-size-radio">
+                <el-radio-button value="small">小</el-radio-button>
+                <el-radio-button value="medium">中</el-radio-button>
+                <el-radio-button value="large">大</el-radio-button>
+            </el-radio-group>
+            <el-divider direction="vertical" />
             <el-radio-group v-model="sortBy" size="small" class="sort-radio">
                 <el-radio-button value="modified_time">修改日期</el-radio-button>
                 <el-radio-button value="file_name">文件名</el-radio-button>
@@ -167,6 +181,7 @@ const toggleSelection = (id: number) => {
 
     <VirtualWaterfall 
       :items="images" 
+      :column-width="currentColumnWidth"
       :gap="16" 
       :buffer="1000"
       @load-more="imageStore.fetchImages()"
@@ -199,12 +214,15 @@ const toggleSelection = (id: number) => {
                   </template>
               </el-dropdown>
           </div>
-          <div class="img-info">
+          <div class="img-info" v-if="gridSize !== 'small'">
             <div class="img-name">{{ img.file_name }}</div>
             <div class="img-meta">
               {{ img.width }} x {{ img.height }} | {{ (img.file_size / 1024 / 1024).toFixed(2) }} MB | 
               {{ isNaN(new Date(img.modified_time).getTime()) ? (new Date(img.modified_time * 1000).toLocaleDateString()) : (new Date(img.modified_time).toLocaleDateString()) }}
             </div>
+          </div>
+          <div class="img-info-mini" v-else>
+             <div class="img-name-mini">{{ img.file_name }}</div>
           </div>
         </div>
       </template>
@@ -452,6 +470,38 @@ const toggleSelection = (id: number) => {
     font-size: 11px;
     color: var(--text-secondary);
     margin-top: 4px;
+}
+
+.img-info-mini {
+    padding: 6px 8px;
+    background: var(--bg-card);
+}
+
+.img-name-mini {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-primary);
+}
+
+/* 响应式调整列宽 UI */
+@media (max-width: 768px) {
+    .content-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+    .view-options {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .grid-size-radio {
+        order: 1;
+    }
+    .sort-radio {
+        order: 2;
+    }
 }
 
 .card-overlay {

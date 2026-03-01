@@ -30,6 +30,7 @@ export const useImageStore = defineStore('image', () => {
   const sortOrder = ref('DESC')
   const searchQuery = ref('')
   const selectedImageIds = ref<number[]>([])
+  const gridSize = ref<'small' | 'medium' | 'large'>('medium')
   
   const folderStore = useFolderStore()
   const authStore = useAuthStore()
@@ -208,6 +209,7 @@ export const useImageStore = defineStore('image', () => {
     batchDelete,
     batchMoveImages,
     batchDeleteImages,
-    removeImageLocally
+    removeImageLocally,
+    gridSize
   }
 })

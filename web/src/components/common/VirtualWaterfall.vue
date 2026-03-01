@@ -20,7 +20,6 @@ const props = defineProps<{
 
 const emit = defineEmits(['load-more'])
 
-const columnWidth = props.columnWidth || 280
 const gap = props.gap || 16
 const buffer = props.buffer || 800 // px buffer for virtual scroll
 
@@ -34,12 +33,13 @@ const viewportHeight = ref(0)
 // Calculate how many columns fit
 const columnsCount = computed(() => {
   if (!containerWidth.value) return 5
-  return Math.max(1, Math.floor((containerWidth.value + gap) / (columnWidth + gap)))
+  const baseWidth = props.columnWidth || 280
+  return Math.max(1, Math.floor((containerWidth.value + gap) / (baseWidth + gap)))
 })
 
 // Current column width considering container size and gap
 const actualColumnWidth = computed(() => {
-  if (!containerWidth.value) return columnWidth
+  if (!containerWidth.value) return props.columnWidth || 280
   return (containerWidth.value - (columnsCount.value - 1) * gap) / columnsCount.value
 })
 
@@ -88,7 +88,10 @@ const calculateLayout = (isAppend = false) => {
     // Calculate height based on actual column width
     const ratio = item.height / item.width
     const itemHeight = actualColumnWidth.value * ratio
-    const extraHeight = 64
+    
+    // gridSize is not available in props, but we can detect it from context or pass it
+    // For now, let's use a simpler way: if actualColumnWidth is small, use smaller extraHeight
+    const extraHeight = actualColumnWidth.value < 200 ? 32 : 64
 
     newLayout.push({
       id: item.id,
@@ -156,7 +159,7 @@ onUnmounted(() => {
   scrollContainerRef.value?.removeEventListener('scroll', handleScroll)
 })
 
-watch([containerWidth, columnsCount], () => {
+watch([containerWidth, columnsCount, () => props.columnWidth], () => {
   calculateLayout()
 })
 

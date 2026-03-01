@@ -570,7 +570,13 @@ const saveSettings = async () => {
               <el-switch v-model="settings.ANONYMOUS_ACCESS" />
             </el-form-item>
             <el-form-item label="缩略图质量">
-              <el-slider v-model="settings.THUMBNAIL_QUALITY" :min="10" :max="100" />
+              <el-slider v-model="settings.THUMBNAIL_QUALITY" :min="10" :max="100" :format-tooltip="(val) => val + '%'" />
+              <div class="form-tip">
+                设置 JPEG 压缩质量（10-100）。数值越高图片越清晰，但占用空间越大。
+                <br/>
+                <span class="warning-text">注意：修改仅对<strong>新生成</strong>的缩略图生效。</span>
+                若要更新现有图片，请执行 <el-link type="primary" :underline="false" @click="handleClearCache" style="font-size: 12px; vertical-align: baseline;">清理缓存</el-link>。
+              </div>
             </el-form-item>
             <el-divider content-position="left">扫描设置</el-divider>
             <el-form-item label="递归扫描">
@@ -825,6 +831,10 @@ const saveSettings = async () => {
 
 .error-text {
   color: var(--el-color-danger);
+}
+
+.warning-text {
+  color: var(--el-color-warning);
 }
 
 .settings-form {
