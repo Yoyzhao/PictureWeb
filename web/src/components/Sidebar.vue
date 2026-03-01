@@ -90,7 +90,13 @@ const handleAddFolder = async () => {
 <template>
   <div class="sidebar">
     <div class="sidebar-header">
-      <el-icon class="logo-icon"><Monitor /></el-icon>
+      <div class="logo-icon-wrapper">
+        <svg t="1772303653694" class="logo-icon-svg" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="16823" xmlns:xlink="http://www.w3.org/1999/xlink">
+          <path d="M512 0c281.6 0 512 230.4 512 512s-230.4 512-512 512S0 793.6 0 512 230.4 0 512 0z" fill="#25B279" opacity=".1" p-id="16824"></path>
+          <path d="M314.7776 317.44h394.24c28.16 0 48.64 23.04 48.64 48.64v184.32l-117.76-117.76c-7.68-7.68-17.92-7.68-25.6 0l-84.48 84.48-43.52-46.08c-2.56-2.56-7.68-2.56-12.8 0l-161.28 161.28h-46.08V366.08c0-28.16 20.48-48.64 48.64-48.64m478.72 271.36v-222.72c0-46.08-38.4-84.48-84.48-84.48h-394.24c-46.08 0-84.48 38.4-84.48 84.48v291.84c0 46.08 38.4 84.48 84.48 84.48h394.24c46.08 0 84.48-38.4 84.48-84.48v-61.44-7.68" fill="#25B279" p-id="16825"></path>
+          <path d="M358.2976 409.6c0 15.36 10.24 25.6 25.6 25.6s25.6-10.24 25.6-25.6-10.24-25.6-25.6-25.6-25.6 10.24-25.6 25.6" fill="#25B279" p-id="16826"></path>
+        </svg>
+      </div>
       <span class="logo-text">PictureWeb</span>
     </div>
     
@@ -207,9 +213,17 @@ const handleAddFolder = async () => {
     flex-shrink: 0;
 }
 
-.logo-icon {
-    font-size: 24px;
-    color: var(--primary);
+.logo-icon-wrapper {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.logo-icon-svg {
+    width: 100%;
+    height: 100%;
 }
 
 .logo-text {

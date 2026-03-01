@@ -9,7 +9,7 @@ import { useImageStore } from '@/stores/image'
 import { storeToRefs } from 'pinia'
 
 const imageStore = useImageStore()
-const { images, showAdminView } = storeToRefs(imageStore)
+const { images, total, loading, showAdminView } = storeToRefs(imageStore)
 
 const showLightbox = ref(false)
 const currentImageId = ref<number | null>(null)
@@ -25,10 +25,14 @@ const currentIndex = computed(() => {
 })
 
 const hasPrev = computed(() => currentIndex.value > 0)
-const hasNext = computed(() => currentIndex.value < images.value.length - 1 && currentIndex.value !== -1)
+const hasNext = computed(() => {
+  if (currentIndex.value === -1) return false
+  // Either we have a next image in current list, or we have more to load from server
+  return currentIndex.value < images.value.length - 1 || images.value.length < total.value
+})
 
 const prevImage = computed(() => hasPrev.value ? images.value[currentIndex.value - 1] : null)
-const nextImage = computed(() => hasNext.value ? images.value[currentIndex.value + 1] : null)
+const nextImage = computed(() => (currentIndex.value < images.value.length - 1) ? images.value[currentIndex.value + 1] : null)
 
 const handleOpenLightbox = (image: any) => {
   currentImageId.value = image.id
@@ -42,10 +46,25 @@ const handlePrev = () => {
   }
 }
 
-const handleNext = () => {
-  if (hasNext.value) {
+const handleNext = async () => {
+  if (currentIndex.value < images.value.length - 1) {
+    // We already have the next image loaded
     const nextImg = images.value[currentIndex.value + 1]
     currentImageId.value = nextImg.id
+    
+    // Check if we need to load more images for later
+    if (currentIndex.value > images.value.length - 10 && images.value.length < total.value && !loading.value) {
+      imageStore.fetchImages()
+    }
+  } else if (images.value.length < total.value) {
+    // We are at the end but there are more images on server
+    if (!loading.value) {
+      const oldLength = images.value.length
+      await imageStore.fetchImages()
+      if (images.value.length > oldLength) {
+        currentImageId.value = images.value[oldLength].id
+      }
+    }
   }
 }
 </script>
@@ -70,6 +89,9 @@ const handleNext = () => {
         :next-image="nextImage"
         :has-prev="hasPrev"
         :has-next="hasNext"
+        :current-index="currentIndex"
+        :total-images="total"
+        :loading="loading"
         @close="showLightbox = false"
         @prev="handlePrev"
         @next="handleNext"

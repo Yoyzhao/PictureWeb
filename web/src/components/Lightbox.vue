@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import api from '@/api'
-import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete } from '@element-plus/icons-vue'
+import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading } from '@element-plus/icons-vue'
 import type { Image as ImageItem } from '@/stores/image'
 import { useImageStore } from '@/stores/image'
 import { ElMessageBox, ElMessage } from 'element-plus'
@@ -13,6 +13,9 @@ const props = defineProps<{
   nextImage: ImageItem | null
   hasPrev: boolean
   hasNext: boolean
+  currentIndex?: number
+  totalImages?: number
+  loading?: boolean
 }>()
 
 const emit = defineEmits(['close', 'prev', 'next'])
@@ -229,6 +232,15 @@ onUnmounted(() => {
   <div v-if="visible" class="lightbox" @click.self="emit('close')" @wheel="handleWheel">
     <div class="lightbox-overlay"></div>
     
+    <div class="image-counter" v-if="currentIndex !== undefined && totalImages !== undefined">
+      {{ currentIndex + 1 }} / {{ totalImages }}
+    </div>
+
+    <div class="loading-overlay" v-if="loading">
+      <el-icon class="is-loading"><Loading /></el-icon>
+      <span>正在加载更多图片...</span>
+    </div>
+
     <div class="lightbox-content">
       <transition name="image-fade" mode="out-in">
         <img :key="imageUrl" :src="imageUrl" :alt="image?.file_name" :style="imageStyle" />
@@ -352,8 +364,49 @@ onUnmounted(() => {
     transition: all 0.3s ease;
 }
 
+.loading-overlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.7);
+    padding: 20px 30px;
+    border-radius: 12px;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    z-index: 1002;
+    font-size: 14px;
+}
+
+.loading-overlay .el-icon {
+    font-size: 32px;
+}
+
+.image-counter {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 6px 14px;
+    border-radius: 20px;
+    z-index: 1001;
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    user-select: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+}
+
 .lightbox:hover .control-btn,
 .lightbox:hover .lightbox-toolbar,
+.lightbox:hover .image-counter,
 .lightbox:hover .image-meta {
     opacity: 1;
     visibility: visible;
