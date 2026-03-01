@@ -27,6 +27,9 @@ const currentIndex = computed(() => {
 const hasPrev = computed(() => currentIndex.value > 0)
 const hasNext = computed(() => currentIndex.value < images.value.length - 1 && currentIndex.value !== -1)
 
+const prevImage = computed(() => hasPrev.value ? images.value[currentIndex.value - 1] : null)
+const nextImage = computed(() => hasNext.value ? images.value[currentIndex.value + 1] : null)
+
 const handleOpenLightbox = (image: any) => {
   currentImageId.value = image.id
   showLightbox.value = true
@@ -63,6 +66,8 @@ const handleNext = () => {
         v-if="showLightbox && currentImage"
         :visible="true"
         :image="currentImage"
+        :prev-image="prevImage"
+        :next-image="nextImage"
         :has-prev="hasPrev"
         :has-next="hasNext"
         @close="showLightbox = false"

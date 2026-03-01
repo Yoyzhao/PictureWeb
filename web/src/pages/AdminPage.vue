@@ -9,6 +9,44 @@ const users = ref<any[]>([])
 const permissions = ref<any[]>([])
 const folders = ref<any[]>([])
 const settings = ref<any>({})
+const cacheStats = ref<any>({ size_human: '计算中...', path: '' })
+const isClearingCache = ref(false)
+
+const fetchCacheStats = async () => {
+  try {
+    const res = await api.get('/admin/cache/stats')
+    cacheStats.value = res.data
+    if (res.data.error) {
+      console.warn('Cache stats notice:', res.data.error)
+    }
+  } catch (err: any) {
+    console.error('Failed to fetch cache stats', err)
+    cacheStats.value = {
+      size_human: '获取失败',
+      path: '',
+      error: err.response?.data?.error || err.message
+    }
+  }
+}
+
+const handleClearCache = async () => {
+  try {
+    await ElMessageBox.confirm('确定要清理所有缩略图缓存吗？这不会删除原图，但下次访问时需要重新生成缩略图。', '清理缓存', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    isClearingCache.value = true
+    await api.post('/admin/cache/clear')
+    ElMessage.success('缓存已清理')
+    fetchCacheStats()
+  } catch (err) {
+    if (err !== 'cancel') ElMessage.error('清理失败')
+  } finally {
+    isClearingCache.value = false
+  }
+}
 
 const showUserDialog = ref(false)
 const showPermissionDialog = ref(false)
@@ -59,6 +97,10 @@ const fetchSettings = async () => {
   try {
     const res = await api.get('/admin/settings')
     settings.value = res.data
+    // 确保预加载开关有默认值
+    if (settings.value.ENABLE_PRELOAD === undefined) {
+      settings.value.ENABLE_PRELOAD = true
+    }
   } catch (err) {
     ElMessage.error('获取系统设置失败')
   }
@@ -69,6 +111,7 @@ onMounted(() => {
   fetchFolders()
   fetchPermissions()
   fetchSettings()
+  fetchCacheStats()
 })
 
 const showFolderDialog = ref(false)
@@ -400,6 +443,25 @@ const saveSettings = async () => {
               <el-input v-model="settings.SCAN_EXTENSIONS" placeholder="例如: .jpg,.png,.webp" />
               <div class="form-tip">多个格式请用英文逗号隔开</div>
             </el-form-item>
+            <el-divider content-position="left">性能与缓存</el-divider>
+            <el-form-item label="图片预加载">
+              <el-switch v-model="settings.ENABLE_PRELOAD" />
+              <div class="form-tip">浏览大图时自动预加载下一张，提升浏览体验</div>
+            </el-form-item>
+            <el-form-item label="缓存占用">
+              <div class="cache-info">
+                <span class="cache-size" :class="{ 'error-text': cacheStats.error }">{{ cacheStats.size_human }}</span>
+                <el-button 
+                  type="danger" 
+                  size="small" 
+                  :loading="isClearingCache"
+                  @click="handleClearCache"
+                  style="margin-left: 15px"
+                >清理缓存</el-button>
+              </div>
+              <div class="form-tip" v-if="cacheStats.error" style="color: var(--el-color-danger)">{{ cacheStats.error }}</div>
+              <div class="form-tip">清理缩略图缓存，不会影响原始图片</div>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="saveSettings">保存设置</el-button>
             </el-form-item>
@@ -542,6 +604,20 @@ const saveSettings = async () => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   margin-top: 4px;
+}
+
+.cache-info {
+  display: flex;
+  align-items: center;
+}
+
+.cache-size {
+  font-family: monospace;
+  font-weight: bold;
+}
+
+.error-text {
+  color: var(--el-color-danger);
 }
 
 .settings-form {

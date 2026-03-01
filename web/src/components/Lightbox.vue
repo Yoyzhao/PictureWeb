@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import api from '@/api'
 import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete } from '@element-plus/icons-vue'
-import type { Image } from '@/stores/image'
+import type { Image as ImageItem } from '@/stores/image'
 import { useImageStore } from '@/stores/image'
 import { ElMessageBox, ElMessage } from 'element-plus'
 
 const props = defineProps<{
   visible: boolean
-  image: Image | null
+  image: ImageItem | null
+  prevImage: ImageItem | null
+  nextImage: ImageItem | null
   hasPrev: boolean
   hasNext: boolean
 }>()
@@ -15,7 +18,91 @@ const props = defineProps<{
 const emit = defineEmits(['close', 'prev', 'next'])
 const imageStore = useImageStore()
 
+const isPreloadEnabled = ref(true)
+
+const fetchPreloadSetting = async () => {
+  try {
+    const res = await api.get('/admin/settings')
+    if (res.data && res.data.ENABLE_PRELOAD !== undefined) {
+      isPreloadEnabled.value = !!res.data.ENABLE_PRELOAD
+    }
+  } catch (err) {
+    // 默认开启，如果获取失败也不影响
+    console.warn('Failed to fetch preload setting, using default: enabled')
+  }
+}
+
 const imageUrl = computed(() => props.image ? `/api/images/${props.image.id}/raw` : '')
+
+// Preload logic
+const preloadedUrls = new Set<string>()
+
+const preloadImage = (image: ImageItem | null, isNext: boolean) => {
+  if (!image || !isPreloadEnabled.value) return
+  
+  // Preload medium thumbnail first (fast, reliable fallback)
+  const thumbUrl = `/api/images/${image.id}/thumbnail?size=medium`
+  if (!preloadedUrls.has(thumbUrl)) {
+    const thumbImg = new Image()
+    thumbImg.src = thumbUrl
+    preloadedUrls.add(thumbUrl)
+  }
+
+  // Only preload raw image for the NEXT one to save cache/bandwidth
+  // Most users browse forward. Preloading 10MB+ for the previous image is often wasteful.
+  if (isNext) {
+    const rawUrl = `/api/images/${image.id}/raw`
+    if (!preloadedUrls.has(rawUrl)) {
+      const rawImg = new Image()
+      // Use decode() to ensure the image is ready in memory without blocking main thread
+      rawImg.src = rawUrl
+      if ('decode' in rawImg) {
+        rawImg.decode().catch(() => { /* ignore error */ })
+      }
+      preloadedUrls.add(rawUrl)
+    }
+  }
+}
+
+watch(() => props.image?.id, (newId) => {
+  if (newId) {
+    if (!isPreloadEnabled.value) return
+
+    // Priority 1: Next image medium thumb (immediate-ish)
+    setTimeout(() => {
+      if (props.nextImage) preloadImage(props.nextImage, true)
+    }, 300)
+
+    // Priority 2: Prev image medium thumb (short delay)
+    setTimeout(() => {
+      if (props.prevImage) preloadImage(props.prevImage, false)
+    }, 800)
+    
+    // Priority 3: Next image RAW (Delay depends on file size)
+    const nextImg = props.nextImage
+    if (nextImg) {
+      const isLarge = (nextImg.file_size || 0) > 10 * 1024 * 1024
+      const rawDelay = isLarge ? 3000 : 1200
+      
+      setTimeout(() => {
+        if (props.image?.id === newId && props.nextImage?.id === nextImg.id) {
+          const rawUrl = `/api/images/${nextImg.id}/raw`
+          if (!preloadedUrls.has(rawUrl)) {
+            const rawImg = new Image()
+            rawImg.src = rawUrl
+            preloadedUrls.add(rawUrl)
+          }
+        }
+      }, rawDelay)
+    }
+  }
+}, { immediate: true })
+
+watch(() => props.visible, (visible) => {
+  if (visible) {
+    fetchPreloadSetting()
+  }
+})
 
 const truncatedFileName = computed(() => {
   if (!props.image?.file_name) return ''

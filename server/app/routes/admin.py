@@ -1,17 +1,87 @@
 from flask import Blueprint, request, jsonify, current_app, g
 from app.utils.db import get_db
+from werkzeug.security import generate_password_hash
 import yaml
 import os
-from werkzeug.security import generate_password_hash
+import shutil
 from app.routes.auth import login_required
 
 bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
+# --- Helper to get directory size ---
+def get_dir_size(path):
+    total = 0
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    if entry.is_file():
+                        total += entry.stat().st_size
+                    elif entry.is_dir():
+                        total += get_dir_size(entry.path)
+                except (OSError, PermissionError):
+                    continue
+    except (OSError, PermissionError, FileNotFoundError):
+        pass
+    return total
+
 @bp.before_request
 @login_required
 def require_admin():
+    if not hasattr(g, 'user') or not g.user:
+        return jsonify({'error': 'Unauthorized'}), 401
     if g.user['role'] != 'admin':
         return jsonify({'error': 'Admin permission required'}), 403
+
+# --- Cache Management ---
+
+@bp.route('/cache/stats', methods=['GET'])
+def get_cache_stats():
+    try:
+        cache_dir = current_app.config.get('CACHE_DIR')
+        if not cache_dir:
+            return jsonify({'size': 0, 'size_human': '0.00 MB', 'path': None, 'error': 'CACHE_DIR not configured'})
+            
+        if not os.path.exists(cache_dir):
+            return jsonify({'size': 0, 'size_human': '0.00 MB', 'path': cache_dir, 'error': 'Cache directory does not exist'})
+        
+        size = get_dir_size(cache_dir)
+        return jsonify({
+            'size': size,
+            'size_human': f"{size / (1024*1024):.2f} MB",
+            'path': cache_dir
+        })
+    except Exception as e:
+        current_app.logger.error(f"Error getting cache stats: {str(e)}")
+        return jsonify({'error': str(e), 'size': 0, 'size_human': 'Error'}), 500
+
+@bp.route('/cache/clear', methods=['POST'])
+def clear_cache():
+    cache_dir = current_app.config.get('CACHE_DIR')
+    if not cache_dir or not os.path.exists(cache_dir):
+        return jsonify({'success': True, 'message': 'Cache directory not found'})
+    
+    try:
+        # Clear subdirectories but keep the root cache dir
+        for item in os.listdir(cache_dir):
+            item_path = os.path.join(cache_dir, item)
+            try:
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                else:
+                    os.remove(item_path)
+            except (OSError, PermissionError):
+                continue # Skip files in use
+        
+        # Also clear the thumbnails table in DB
+        db = get_db()
+        db.execute("DELETE FROM thumbnails")
+        db.commit()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        current_app.logger.error(f"Error clearing cache: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 # --- User Management ---
 
