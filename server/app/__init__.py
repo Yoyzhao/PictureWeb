@@ -10,7 +10,6 @@ def create_app(test_config=None):
     static_folder = os.path.join(project_root, 'web', 'dist')
     
     app = Flask(__name__, 
-                instance_relative_config=True,
                 static_folder=static_folder,
                 static_url_path='/')
     
@@ -29,12 +28,6 @@ def create_app(test_config=None):
             app.config.update(config)
     
     CORS(app) # Enable CORS for all routes
-
-    # Ensure instance folder exists
-    try:
-        os.makedirs(app.instance_path)
-    except OSError:
-        pass
 
     # Initialize database
     from .utils import db
