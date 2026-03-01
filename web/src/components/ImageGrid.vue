@@ -472,17 +472,21 @@ const toggleSelection = (id: number) => {
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: rgba(0,0,0,0.6);
-    border: none;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     color: white;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: all 0.2s ease;
 }
 
 .action-btn:hover {
     background: var(--primary);
+    border-color: var(--primary);
+    transform: scale(1.1);
 }
 
 .load-more {

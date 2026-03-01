@@ -113,7 +113,7 @@ watch(() => props.visible, (visible) => {
 const truncatedFileName = computed(() => {
   if (!props.image?.file_name) return ''
   const name = props.image.file_name
-  return name.length > 50 ? name.slice(0, 47) + '...' : name
+  return name.length > 20 ? name.slice(0, 17) + '...' : name
 })
 
 const fileSizeMB = computed(() => {
@@ -127,9 +127,79 @@ const rotate = ref(0)
 const translateX = ref(0)
 const translateY = ref(0)
 
+// Touch handling state
+const touchStartX = ref(0)
+const touchStartY = ref(0)
+const touchEndX = ref(0)
+const touchEndY = ref(0)
+const initialPinchDistance = ref(0)
+const initialScale = ref(1)
+const isSwiping = ref(false)
+const isPinching = ref(false)
+
+const getDistance = (touches: TouchList) => {
+  return Math.hypot(
+    touches[0].clientX - touches[1].clientX,
+    touches[0].clientY - touches[1].clientY
+  )
+}
+
+const handleTouchStart = (e: TouchEvent) => {
+  if (e.touches.length === 1) {
+    touchStartX.value = e.touches[0].clientX
+    touchStartY.value = e.touches[0].clientY
+    isSwiping.value = true
+    isPinching.value = false
+  } else if (e.touches.length === 2) {
+    isPinching.value = true
+    isSwiping.value = false
+    initialPinchDistance.value = getDistance(e.touches)
+    initialScale.value = scale.value
+  }
+}
+
+const handleTouchMove = (e: TouchEvent) => {
+  if (isPinching.value && e.touches.length === 2) {
+    if (e.cancelable) e.preventDefault()
+    const currentDistance = getDistance(e.touches)
+    const ratio = currentDistance / initialPinchDistance.value
+    scale.value = Math.max(0.1, Math.min(5, initialScale.value * ratio))
+  } else if (isSwiping.value && e.touches.length === 1 && scale.value === 1) {
+    touchEndX.value = e.touches[0].clientX
+    touchEndY.value = e.touches[0].clientY
+  } else if (scale.value > 1 && e.touches.length === 1) {
+    if (e.cancelable) e.preventDefault()
+    // Optional: Add image panning when zoomed in
+    const dx = e.touches[0].clientX - touchStartX.value
+    const dy = e.touches[0].clientY - touchStartY.value
+    translateX.value += dx
+    translateY.value += dy
+    touchStartX.value = e.touches[0].clientX
+    touchStartY.value = e.touches[0].clientY
+  }
+}
+
+const handleTouchEnd = (e: TouchEvent) => {
+  if (isSwiping.value && scale.value === 1) {
+    const deltaX = touchEndX.value - touchStartX.value
+    const deltaY = touchEndY.value - touchStartY.value
+    const threshold = 50
+
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > threshold) {
+      if (deltaX > 0 && props.hasPrev) {
+        emit('prev')
+      } else if (deltaX < 0 && props.hasNext) {
+        emit('next')
+      }
+    }
+  }
+  isSwiping.value = false
+  isPinching.value = false
+}
+
 const imageStyle = computed(() => ({
   transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value}) rotate(${rotate.value}deg)`,
-  transition: 'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+  transition: isPinching.value || (scale.value > 1 && isSwiping.value) ? 'none' : 'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
 }))
 
 // Reset transformations when image changes
@@ -263,7 +333,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="visible" class="lightbox" @click.self="emit('close')" @wheel="handleWheel">
+  <div 
+    v-if="visible" 
+    class="lightbox" 
+    @click.self="emit('close')" 
+    @wheel="handleWheel"
+    @touchstart="handleTouchStart"
+    @touchmove="handleTouchMove"
+    @touchend="handleTouchEnd"
+  >
     <div class="lightbox-overlay"></div>
     
     <div class="image-counter" v-if="currentIndex !== undefined && totalImages !== undefined">
@@ -356,6 +434,8 @@ onUnmounted(() => {
     object-fit: contain;
     box-shadow: 0 0 40px rgba(0,0,0,0.5);
     will-change: transform, opacity;
+    user-select: none;
+    -webkit-user-drag: none;
 }
 
 /* 图片切换动画 */
@@ -378,8 +458,9 @@ onUnmounted(() => {
     position: fixed;
     top: 50%;
     transform: translateY(-50%);
-    background: rgba(255,255,255,0.1);
-    border: none;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     color: white;
     font-size: 24px;
     padding: 12px;
@@ -394,6 +475,7 @@ onUnmounted(() => {
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .loading-overlay {
@@ -424,16 +506,18 @@ onUnmounted(() => {
     color: white;
     font-size: 14px;
     font-weight: 500;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     padding: 6px 14px;
     border-radius: 20px;
     z-index: 1001;
-    backdrop-filter: blur(4px);
     pointer-events: none;
     user-select: none;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .lightbox:hover .control-btn,
@@ -448,7 +532,9 @@ onUnmounted(() => {
 .next-btn { right: 20px; }
 
 .lightbox-controls .control-btn:hover {
-    background: rgba(255,255,255,0.2);
+    background: rgba(0, 0, 0, 0.7);
+    border-color: var(--primary);
+    transform: translateY(-50%) scale(1.05);
 }
 
 .lightbox-toolbar {
@@ -463,8 +549,9 @@ onUnmounted(() => {
 }
 
 .lightbox-toolbar button {
-    background: rgba(255,255,255,0.1);
-    border: none;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     color: white;
     width: 44px;
     height: 44px;
@@ -474,10 +561,14 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     font-size: 18px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .lightbox-toolbar button:hover {
-    background: rgba(255,255,255,0.2);
+    background: rgba(0, 0, 0, 0.7);
+    border-color: var(--primary);
+    transform: translateY(-2px);
 }
 
 .lightbox-toolbar .btn-fav.active {
@@ -499,7 +590,9 @@ onUnmounted(() => {
     bottom: 30px;
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(0,0,0,0.6);
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     padding: 10px 25px;
     border-radius: 30px;
     color: white;
@@ -507,11 +600,11 @@ onUnmounted(() => {
     display: flex;
     gap: 15px;
     align-items: center;
-    backdrop-filter: blur(10px);
     z-index: 1010;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s ease;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 .meta-divider {
@@ -520,11 +613,42 @@ onUnmounted(() => {
     font-weight: 300;
 }
 
-#meta-filename {
-    font-weight: 500;
-    max-width: 400px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+/* 移动端优化 */
+@media (max-width: 768px) {
+    .lightbox-controls .control-btn {
+        display: none; /* 移动端使用手势切换，隐藏按钮 */
+    }
+
+    .lightbox-toolbar {
+        top: 10px;
+        right: 10px;
+        gap: 8px;
+    }
+
+    .lightbox-toolbar button {
+        width: 38px;
+        height: 38px;
+        font-size: 16px;
+    }
+
+    .image-meta {
+        bottom: 20px;
+        padding: 8px 16px;
+        font-size: 12px;
+        width: 90%;
+        max-width: none;
+        justify-content: center;
+    }
+
+    #meta-filename {
+        max-width: 150px;
+    }
+
+    .image-counter {
+        top: 10px;
+        left: 10px;
+        font-size: 12px;
+        padding: 4px 10px;
+    }
 }
 </style>
