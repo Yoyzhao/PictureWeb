@@ -92,6 +92,11 @@ html.dark {
   --accent: #2c2c2c;
 }
 
+/* 隐藏 Trae 插件的 Badge 元素 */
+#trae-badge-plugin {
+  display: none !important;
+}
+
 body {
     background-color: var(--bg-main);
     color: var(--text-primary);
