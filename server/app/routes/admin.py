@@ -157,7 +157,13 @@ def delete_user(id):
 @bp.route('/folders', methods=['GET'])
 def get_folders():
     db = get_db()
-    folders = db.execute("SELECT * FROM folders").fetchall()
+    query = """
+        SELECT id, path, name, user_id, is_public, 
+               scan_status, scan_total, scan_processed, scan_error,
+               created_at, updated_at 
+        FROM folders
+    """
+    folders = db.execute(query).fetchall()
     return jsonify([dict(f) for f in folders])
 
 @bp.route('/folders/<int:id>', methods=['DELETE'])

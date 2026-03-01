@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { User, Folder, Setting, Plus, Delete, Edit } from '@element-plus/icons-vue'
+import { User, Folder, Setting, Plus, Delete, Edit, Warning } from '@element-plus/icons-vue'
 
 const activeTab = ref('users')
 const users = ref<any[]>([])
@@ -11,6 +11,27 @@ const folders = ref<any[]>([])
 const settings = ref<any>({})
 const cacheStats = ref<any>({ size_human: '计算中...', path: '' })
 const isClearingCache = ref(false)
+let pollingTimer: number | null = null
+
+const startPolling = () => {
+  if (pollingTimer) return
+  pollingTimer = window.setInterval(() => {
+    // Only poll if there's any folder scanning or pending
+    const hasScanning = folders.value.some(f => f.scan_status === 'scanning' || f.scan_status === 'pending')
+    if (hasScanning) {
+      fetchFolders(false) // Pass false to avoid ElMessage on error
+    } else {
+      stopPolling()
+    }
+  }, 2000)
+}
+
+const stopPolling = () => {
+  if (pollingTimer) {
+    clearInterval(pollingTimer)
+    pollingTimer = null
+  }
+}
 
 const fetchCacheStats = async () => {
   try {
@@ -72,16 +93,27 @@ const fetchUsers = async () => {
   }
 }
 
-const fetchFolders = async () => {
+const fetchFolders = async (showError = true) => {
   try {
     const res = await api.get('/admin/folders')
     folders.value = res.data.map((f: any) => ({
       ...f,
       is_public: !!f.is_public
     }))
+    
+    // Check if we need to start polling
+    const hasScanning = folders.value.some(f => f.scan_status === 'scanning' || f.scan_status === 'pending')
+    if (hasScanning) {
+      startPolling()
+    }
   } catch (err) {
-    ElMessage.error('获取文件夹列表失败')
+    if (showError) ElMessage.error('获取文件夹列表失败')
   }
+}
+
+const getScanPercentage = (folder: any) => {
+  if (!folder.scan_total || folder.scan_total === 0) return 0
+  return Math.round((folder.scan_processed / folder.scan_total) * 100)
 }
 
 const fetchPermissions = async () => {
@@ -112,6 +144,10 @@ onMounted(() => {
   fetchPermissions()
   fetchSettings()
   fetchCacheStats()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 
 const showFolderDialog = ref(false)
@@ -220,24 +256,18 @@ const toggleFolderPublic = async (row: any) => {
 
 const handleScanFolder = async (id: number) => {
   try {
-    ElMessage.info('扫描任务已提交，请稍候...')
     const res = await api.post(`/folders/${id}/scan`)
-    const { processed, removed, total } = res.data
-    
-    ElMessageBox.alert(
-      `扫描已完成：<br/>
-       - 处理图片: <strong>${processed}</strong> 张<br/>
-       - 清理失效图片: <strong>${removed}</strong> 张<br/>
-       - 当前文件夹总数: <strong>${total}</strong> 张`,
-      '扫描结果',
-      {
-        dangerouslyUseHTMLString: true,
-        confirmButtonText: '确定',
-        type: 'success'
-      }
-    )
-  } catch (err) {
-    ElMessage.error('扫描失败')
+    ElMessage.success(res.data.message || '扫描任务已提交，请查看状态进度')
+    // Update local state to show 'scanning' immediately
+    const folder = folders.value.find(f => f.id === id)
+    if (folder) {
+      folder.scan_status = 'scanning'
+      folder.scan_processed = 0
+      folder.scan_total = 0
+    }
+    startPolling()
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.error || '提交扫描任务失败')
   }
 }
 
@@ -373,6 +403,36 @@ const saveSettings = async () => {
             <el-table-column label="公开状态" width="100">
               <template #default="{ row }">
                 <el-switch v-model="row.is_public" @change="toggleFolderPublic(row)" />
+              </template>
+            </el-table-column>
+            <el-table-column label="扫描状态" width="200">
+              <template #default="{ row }">
+                <div v-if="row.scan_status === 'scanning' || row.scan_status === 'pending'" class="scan-status">
+                  <el-progress 
+                    :percentage="getScanPercentage(row)"
+                    :stroke-width="14"
+                    striped
+                    striped-flow
+                    :status="row.scan_status === 'pending' ? '' : 'success'"
+                  />
+                  <div class="scan-text">
+                    {{ row.scan_status === 'pending' ? '等待扫描...' : `正在扫描: ${row.scan_processed}/${row.scan_total}` }}
+                  </div>
+                </div>
+                <div v-else-if="row.scan_status === 'failed'" class="scan-status failed">
+                  <el-tag type="danger" size="small">
+                    扫描失败
+                    <el-tooltip :content="row.scan_error" placement="top">
+                      <el-icon class="error-icon"><Warning /></el-icon>
+                    </el-tooltip>
+                  </el-tag>
+                </div>
+                <div v-else-if="row.scan_status === 'completed'" class="scan-status completed">
+                  <el-tag type="success" size="small">已完成</el-tag>
+                </div>
+                <div v-else>
+                  <el-tag type="info" size="small">未扫描</el-tag>
+                </div>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="350">
@@ -642,6 +702,24 @@ const saveSettings = async () => {
 .cache-size {
   font-family: monospace;
   font-weight: bold;
+}
+
+.scan-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scan-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.error-icon {
+  margin-left: 4px;
+  vertical-align: middle;
+  cursor: help;
 }
 
 .error-text {

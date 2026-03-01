@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS folders (
     name VARCHAR(255) NOT NULL,
     user_id INTEGER,
     is_public BOOLEAN DEFAULT FALSE,
+    scan_status VARCHAR(20) DEFAULT 'none' CHECK (scan_status IN ('none', 'pending', 'scanning', 'completed', 'failed')),
+    scan_total INTEGER DEFAULT 0,
+    scan_processed INTEGER DEFAULT 0,
+    scan_error TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)
