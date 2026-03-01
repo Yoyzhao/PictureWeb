@@ -83,8 +83,18 @@ SCAN_EXTENSIONS: ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff"
 在生产环境下，不建议使用 Flask 自带的开发服务器。建议编写一个简单的启动脚本 `prod_run.py`：
 
 ```python
+import os
+import sys
 from waitress import serve
-from server.app import create_app
+
+# 确保在项目根目录下运行
+project_root = os.path.dirname(os.path.abspath(__file__))
+os.chdir(project_root)
+
+# 将 server 目录添加到 Python 路径，以便 'from app import ...' 能够工作
+sys.path.insert(0, os.path.join(project_root, 'server'))
+
+from app import create_app
 
 app = create_app()
 

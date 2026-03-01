@@ -1,11 +1,14 @@
 import os
 import sys
 from waitress import serve
-from server.app import create_app
-
 # Ensure we're in the project root
 project_root = os.path.dirname(os.path.abspath(__file__))
 os.chdir(project_root)
+
+# Add server directory to sys.path so 'from app import ...' works
+sys.path.insert(0, os.path.join(project_root, 'server'))
+
+from app import create_app
 
 # Check for frontend build
 dist_path = os.path.join(project_root, 'web', 'dist')
