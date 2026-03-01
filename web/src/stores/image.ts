@@ -77,12 +77,15 @@ export const useImageStore = defineStore('image', () => {
     }
   }
 
-  // Watch folder, favorites, sort, search, or user auth change to reset images
-  watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery, user, token], () => {
-    // 如果用户或 Token 变化，重置当前选中的文件夹，因为新用户可能没有旧文件夹的权限
-    if (user.value || !token.value) {
-      folderStore.selectFolder(undefined)
-    }
+  // Watch folder, favorites, sort, or search change to reset images
+  watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () => {
+    fetchImages(true)
+  })
+
+  // Watch user auth change to reset folder and images
+  watch([user, token], () => {
+    // 只有当用户或 Token 真正变化时才重置文件夹，因为新用户可能没有旧文件夹的权限
+    folderStore.selectFolder(undefined)
     fetchImages(true)
   })
 

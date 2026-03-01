@@ -52,20 +52,24 @@ const handleNext = () => {
     <Sidebar />
     <main class="main-content">
       <TopBar />
-      <ImageGrid v-if="!showAdminView" @open-lightbox="handleOpenLightbox" />
-      <AdminPage v-else />
+      <transition name="fade-slide" mode="out-in">
+        <ImageGrid v-if="!showAdminView" @open-lightbox="handleOpenLightbox" />
+        <AdminPage v-else />
+      </transition>
     </main>
     
-    <Lightbox 
-      v-if="showLightbox && currentImage"
-      :visible="true"
-      :image="currentImage"
-      :has-prev="hasPrev"
-      :has-next="hasNext"
-      @close="showLightbox = false"
-      @prev="handlePrev"
-      @next="handleNext"
-    />
+    <transition name="lightbox-fade">
+      <Lightbox 
+        v-if="showLightbox && currentImage"
+        :visible="true"
+        :image="currentImage"
+        :has-prev="hasPrev"
+        :has-next="hasNext"
+        @close="showLightbox = false"
+        @prev="handlePrev"
+        @next="handleNext"
+      />
+    </transition>
   </div>
 </template>
 
@@ -85,5 +89,32 @@ const handleNext = () => {
   flex-direction: column;
   overflow: hidden;
   position: relative;
+}
+
+/* 视图切换动画 */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+/* 灯箱淡入淡出 */
+.lightbox-fade-enter-active,
+.lightbox-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.lightbox-fade-enter-from,
+.lightbox-fade-leave-to {
+  opacity: 0;
 }
 </style>

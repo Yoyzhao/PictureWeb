@@ -173,7 +173,7 @@ const toggleSelection = (id: number) => {
           @click="handleCardClick(img, $event)"
         >
           <div class="card-checkbox" @click.stop="toggleSelection(img.id)">
-              <el-checkbox :model-value="isSelected(img.id)" size="large"></el-checkbox>
+              <el-checkbox :model-value="isSelected(img.id)"></el-checkbox>
           </div>
           <img :src="getThumbnailUrl(img.id)" loading="lazy" :alt="img.file_name" />
           <div class="card-overlay">
@@ -342,14 +342,22 @@ const toggleSelection = (id: number) => {
     position: absolute;
     top: 10px;
     left: 10px;
-    z-index: 5;
+    z-index: 10;
     opacity: 0;
-    transition: opacity 0.2s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: scale(0.9);
+    line-height: 1; /* Ensure no extra height */
+}
+
+:deep(.card-checkbox .el-checkbox) {
+    height: auto;
+    margin-right: 0;
 }
 
 .img-card:hover .card-checkbox,
 .img-card.selected .card-checkbox {
     opacity: 1;
+    transform: scale(1.15); /* Slightly larger on hover/selected for better visibility */
 }
 
 .image-details {
@@ -383,12 +391,19 @@ const toggleSelection = (id: number) => {
 }
 
 :deep(.card-checkbox .el-checkbox__inner) {
-    background: rgba(255, 255, 255, 0.8);
-    border-color: var(--primary);
+    background: rgba(0, 0, 0, 0.4);
+    border: 1.2px solid rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(4px);
+    border-radius: 4px;
 }
 
 :deep(.card-checkbox .el-checkbox__input.is-checked .el-checkbox__inner) {
     background-color: var(--primary);
+    border-color: var(--primary);
+}
+
+:deep(.card-checkbox .el-checkbox__inner::after) {
+    border-width: 2px;
 }
 
 /* Removed .waterfall column layout in favor of VirtualWaterfall */

@@ -37,7 +37,10 @@ const fetchUsers = async () => {
 const fetchFolders = async () => {
   try {
     const res = await api.get('/admin/folders')
-    folders.value = res.data
+    folders.value = res.data.map((f: any) => ({
+      ...f,
+      is_public: !!f.is_public
+    }))
   } catch (err) {
     ElMessage.error('获取文件夹列表失败')
   }

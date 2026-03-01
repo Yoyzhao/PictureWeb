@@ -18,7 +18,10 @@ export const useFolderStore = defineStore('folder', () => {
   const fetchFolders = async () => {
     try {
       const res = await getFolders()
-      folders.value = res.data
+      folders.value = res.data.map((f: any) => ({
+        ...f,
+        is_public: !!f.is_public
+      }))
     } catch (error) {
       console.error('Failed to fetch folders', error)
       ElMessage.error('Failed to fetch folders')

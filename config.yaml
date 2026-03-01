@@ -1,7 +1,7 @@
 ANONYMOUS_ACCESS: true
 CACHE_DIR: F:\_PicCache
 DB_PATH: data/database.db
-LOG_LEVEL: INFO
+LOG_LEVEL: WARNING
 SCAN_EXTENSIONS: .jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff
 SCAN_RECURSIVE: true
 SERVER_PORT: 5000

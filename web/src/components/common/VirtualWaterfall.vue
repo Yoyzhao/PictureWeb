@@ -169,20 +169,22 @@ watch(() => props.items, (newItems, oldItems) => {
 
 <template>
   <div ref="containerRef" class="virtual-waterfall-container" :style="{ height: totalHeight + 'px' }">
-    <div 
-      v-for="item in visibleItems" 
-      :key="item.id" 
-      class="virtual-waterfall-item"
-      :style="{
-        position: 'absolute',
-        top: item.top + 'px',
-        left: item.left + 'px',
-        width: item.width + 'px',
-        height: item.height + 'px'
-      }"
-    >
-      <slot :item="item.item"></slot>
-    </div>
+    <transition-group name="waterfall">
+      <div 
+        v-for="item in visibleItems" 
+        :key="item.id" 
+        class="virtual-waterfall-item"
+        :style="{
+          position: 'absolute',
+          top: item.top + 'px',
+          left: item.left + 'px',
+          width: item.width + 'px',
+          height: item.height + 'px'
+        }"
+      >
+        <slot :item="item.item"></slot>
+      </div>
+    </transition-group>
   </div>
 </template>
 
@@ -193,6 +195,22 @@ watch(() => props.items, (newItems, oldItems) => {
 }
 
 .virtual-waterfall-item {
-  will-change: transform;
+  will-change: transform, opacity;
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease;
+}
+
+/* 瀑布流动画 */
+.waterfall-enter-from {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.waterfall-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+.waterfall-move {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 </style>

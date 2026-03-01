@@ -17,6 +17,17 @@ const imageStore = useImageStore()
 
 const imageUrl = computed(() => props.image ? `/api/images/${props.image.id}/raw` : '')
 
+const truncatedFileName = computed(() => {
+  if (!props.image?.file_name) return ''
+  const name = props.image.file_name
+  return name.length > 50 ? name.slice(0, 47) + '...' : name
+})
+
+const fileSizeMB = computed(() => {
+  if (!props.image?.file_size) return '0.00 MB'
+  return (props.image.file_size / (1024 * 1024)).toFixed(2) + ' MB'
+})
+
 // Image transformation state
 const scale = ref(1)
 const rotate = ref(0)
@@ -132,7 +143,9 @@ onUnmounted(() => {
     <div class="lightbox-overlay"></div>
     
     <div class="lightbox-content">
-      <img :src="imageUrl" :alt="image?.file_name" :style="imageStyle" />
+      <transition name="image-fade" mode="out-in">
+        <img :key="imageUrl" :src="imageUrl" :alt="image?.file_name" :style="imageStyle" />
+      </transition>
       <div class="lightbox-controls">
         <button v-if="hasPrev" class="control-btn prev-btn" @click.stop="emit('prev')">
           <el-icon><ArrowLeft /></el-icon>
@@ -162,8 +175,11 @@ onUnmounted(() => {
       </div>
 
       <div class="image-meta" v-if="image">
-        <span id="meta-filename">{{ image.file_name }}</span>
+        <span id="meta-filename" :title="image.file_name">{{ truncatedFileName }}</span>
+        <span class="meta-divider">|</span>
         <span id="meta-resolution">{{ image.width }} x {{ image.height }}</span>
+        <span class="meta-divider">|</span>
+        <span id="meta-filesize">{{ fileSizeMB }}</span>
       </div>
     </div>
   </div>
@@ -208,6 +224,23 @@ onUnmounted(() => {
     max-height: 100%;
     object-fit: contain;
     box-shadow: 0 0 40px rgba(0,0,0,0.5);
+    will-change: transform, opacity;
+}
+
+/* 图片切换动画 */
+.image-fade-enter-active,
+.image-fade-leave-active {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.image-fade-enter-from {
+    opacity: 0;
+    transform: scale(0.95);
+}
+
+.image-fade-leave-to {
+    opacity: 0;
+    transform: scale(1.05);
 }
 
 .lightbox-controls .control-btn {
@@ -291,18 +324,35 @@ onUnmounted(() => {
 
 .image-meta {
     position: fixed;
-    bottom: 20px;
+    bottom: 30px;
     left: 50%;
     transform: translateX(-50%);
+    background: rgba(0,0,0,0.6);
+    padding: 10px 25px;
+    border-radius: 30px;
     color: white;
     font-size: 14px;
     display: flex;
-    gap: 20px;
-    background: rgba(0,0,0,0.6);
-    padding: 8px 24px;
-    border-radius: 20px;
+    gap: 15px;
+    align-items: center;
+    backdrop-filter: blur(10px);
+    z-index: 1010;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s ease;
+}
+
+.meta-divider {
+    opacity: 0.3;
+    color: #fff;
+    font-weight: 300;
+}
+
+#meta-filename {
+    font-weight: 500;
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 </style>
