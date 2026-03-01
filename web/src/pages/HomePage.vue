@@ -4,12 +4,18 @@ import TopBar from '@/components/TopBar.vue'
 import ImageGrid from '@/components/ImageGrid.vue'
 import AdminPage from '@/pages/AdminPage.vue'
 import Lightbox from '@/components/Lightbox.vue'
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useImageStore } from '@/stores/image'
+import { useHotkeyStore } from '@/stores/hotkey'
 import { storeToRefs } from 'pinia'
 
 const imageStore = useImageStore()
+const hotkeyStore = useHotkeyStore()
 const { images, total, loading, showAdminView } = storeToRefs(imageStore)
+
+onMounted(() => {
+  hotkeyStore.fetchHotkeys()
+})
 
 const showLightbox = ref(false)
 const currentImageId = ref<number | null>(null)

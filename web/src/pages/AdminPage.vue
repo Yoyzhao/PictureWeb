@@ -1,8 +1,50 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { User, Folder, Setting, Plus, Delete, Edit, Warning } from '@element-plus/icons-vue'
+import { User, Folder, Setting, Plus, Delete, Edit, Warning, Pointer, RefreshLeft } from '@element-plus/icons-vue'
+import { useHotkeyStore, DEFAULT_HOTKEYS } from '@/stores/hotkey'
+
+const hotkeyStore = useHotkeyStore()
+const hotkeys = computed(() => hotkeyStore.hotkeys)
+const recordingHotkey = ref<string | null>(null)
+const hotkeyLabels: Record<string, string> = {
+  PREV: '上一张',
+  NEXT: '下一张',
+  CLOSE: '关闭视图',
+  FAVORITE: '收藏/取消收藏',
+  DELETE: '删除图片',
+  ROTATE: '旋转图片',
+  ZOOM_IN: '放大',
+  ZOOM_OUT: '缩小',
+  RESET: '重置视图 (Home)'
+}
+
+const startRecording = (key: string) => {
+  recordingHotkey.value = key
+  window.addEventListener('keydown', handleRecordKey)
+}
+
+const handleRecordKey = (e: KeyboardEvent) => {
+  e.preventDefault()
+  if (!recordingHotkey.value) return
+
+  // Skip modifier-only keys
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return
+
+  hotkeyStore.updateHotkeys({ [recordingHotkey.value]: e.key })
+  stopRecording()
+}
+
+const stopRecording = () => {
+  recordingHotkey.value = null
+  window.removeEventListener('keydown', handleRecordKey)
+}
+
+const resetHotkeys = () => {
+  hotkeyStore.hotkeys = { ...DEFAULT_HOTKEYS }
+  ElMessage.success('已恢复默认快捷键设置，请点击“保存设置”以生效')
+}
 
 const activeTab = ref('users')
 const users = ref<any[]>([])
@@ -132,6 +174,10 @@ const fetchSettings = async () => {
     // 确保预加载开关有默认值
     if (settings.value.ENABLE_PRELOAD === undefined) {
       settings.value.ENABLE_PRELOAD = true
+    }
+    // Sync with hotkey store
+    if (settings.value.HOTKEYS) {
+      hotkeyStore.updateHotkeys(settings.value.HOTKEYS)
     }
   } catch (err) {
     ElMessage.error('获取系统设置失败')
@@ -378,7 +424,11 @@ const deletePermission = async (id: number) => {
 
 const saveSettings = async () => {
   try {
-    await api.post('/admin/settings', settings.value)
+    const payload = { 
+      ...settings.value,
+      HOTKEYS: hotkeyStore.hotkeys 
+    }
+    await api.post('/admin/settings', payload)
     ElMessage.success('设置已保存')
   } catch (err) {
     ElMessage.error('保存设置失败')
@@ -536,6 +586,23 @@ const saveSettings = async () => {
               <el-switch v-model="settings.ENABLE_PRELOAD" />
               <div class="form-tip">浏览大图时自动预加载下一张，提升浏览体验</div>
             </el-form-item>
+            <el-divider content-position="left">操作热键</el-divider>
+            <div class="hotkeys-header">
+              <div class="form-tip">点击按钮后按键盘任意键进行绑定。</div>
+              <el-button size="small" :icon="RefreshLeft" @click="resetHotkeys">恢复默认</el-button>
+            </div>
+            <div class="hotkeys-grid">
+              <div v-for="(label, key) in hotkeyLabels" :key="key" class="hotkey-item">
+                <span class="hotkey-label">{{ label }}</span>
+                <el-button 
+                  class="hotkey-btn"
+                  :type="recordingHotkey === key ? 'danger' : 'default'"
+                  @click="startRecording(key as string)"
+                >
+                  {{ recordingHotkey === key ? '请按键...' : hotkeys[key as keyof typeof hotkeys] }}
+                </el-button>
+              </div>
+            </div>
             <el-form-item label="缓存占用">
               <div class="cache-info">
                 <span class="cache-size" :class="{ 'error-text': cacheStats.error }">{{ cacheStats.size_human }}</span>
@@ -697,6 +764,40 @@ const saveSettings = async () => {
 .cache-info {
   display: flex;
   align-items: center;
+}
+
+.hotkeys-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 0 5px;
+}
+
+.hotkeys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 10px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.hotkey-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.hotkey-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.hotkey-btn {
+  width: 100%;
+  text-transform: capitalize;
 }
 
 .cache-size {

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import api from '@/api'
 import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading } from '@element-plus/icons-vue'
 import type { Image as ImageItem } from '@/stores/image'
 import { useImageStore } from '@/stores/image'
+import { useHotkeyStore } from '@/stores/hotkey'
 import { ElMessageBox, ElMessage } from 'element-plus'
 
 const props = defineProps<{
@@ -20,6 +21,8 @@ const props = defineProps<{
 
 const emit = defineEmits(['close', 'prev', 'next'])
 const imageStore = useImageStore()
+const hotkeyStore = useHotkeyStore()
+const hotkeys = computed(() => hotkeyStore.hotkeys)
 
 const isPreloadEnabled = ref(true)
 
@@ -159,6 +162,23 @@ const handleReset = () => {
 
 const handleFavorite = async () => {
   if (props.image) {
+    const isCurrentlyFavorite = props.image.is_favorite
+    const isInFavoritesView = imageStore.showOnlyFavorites
+    
+    // If we're unfavoriting while in favorites view, we need to move to the next image
+    // BEFORE the store update removes this image from the list.
+    if (isCurrentlyFavorite && isInFavoritesView) {
+      if (props.hasNext) {
+        emit('next')
+      } else if (props.hasPrev) {
+        emit('prev')
+      } else {
+        emit('close')
+      }
+      // Wait for the transition to start
+      await nextTick()
+    }
+    
     await imageStore.toggleFavorite(props.image)
   }
 }
@@ -179,8 +199,10 @@ const handleDelete = async () => {
     
     const res = await imageStore.batchDeleteImages([props.image.id])
     if (res.data.success) {
+      const deletedId = props.image.id
       ElMessage.success('删除成功')
-      // If there's a next image, go to next, otherwise close
+      
+      // 1. Move to next/prev image first to keep the lightbox open
       if (props.hasNext) {
         emit('next')
       } else if (props.hasPrev) {
@@ -188,8 +210,14 @@ const handleDelete = async () => {
       } else {
         emit('close')
       }
-      // Refresh the image list in the background
-      imageStore.fetchImages(true)
+      
+      // 2. Remove from local store silently instead of full refresh
+      imageStore.removeImageLocally(deletedId)
+      
+      // 3. Optional: Trigger a silent load for more images if list is getting short
+      if (imageStore.images.length < 20 && imageStore.total > imageStore.images.length) {
+        imageStore.fetchImages()
+      }
     }
   } catch (error: any) {
     if (error !== 'cancel') {
@@ -200,22 +228,28 @@ const handleDelete = async () => {
 
 const handleKeydown = (e: KeyboardEvent) => {
   if (!props.visible) return
-  if (e.key === 'Escape') emit('close')
-  if (e.key === 'ArrowLeft' && props.hasPrev) emit('prev')
-  if (e.key === 'ArrowRight' && props.hasNext) emit('next')
-  if (e.key === 'Delete') {
+  
+  const key = e.key
+  const hk = hotkeys.value
+
+  if (key === hk.CLOSE) emit('close')
+  if (key === hk.PREV && props.hasPrev) emit('prev')
+  if (key === hk.NEXT && props.hasNext) emit('next')
+  if (key === hk.DELETE) {
     e.preventDefault()
     handleDelete()
   }
-  if (e.key === 'ArrowUp') {
+  if (key === hk.ZOOM_IN) {
     e.preventDefault()
     scale.value = Math.min(5, scale.value + 0.2)
   }
-  if (e.key === 'ArrowDown') {
+  if (key === hk.ZOOM_OUT) {
     e.preventDefault()
     scale.value = Math.max(0.1, scale.value - 0.2)
   }
-  if (e.key === 'r' || e.key === 'R') handleRotate()
+  if (key === hk.ROTATE) handleRotate()
+  if (key === hk.FAVORITE) handleFavorite()
+  if (key === hk.RESET) handleReset()
 }
 
 // Global event listener for keys
@@ -308,19 +342,17 @@ onUnmounted(() => {
 
 .lightbox-content {
     position: relative;
-    max-width: 90%;
-    max-height: 85%;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 100%;
-    height: 100%;
     justify-content: center;
 }
 
 .lightbox-content img {
-    max-width: 100%;
-    max-height: 100%;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     box-shadow: 0 0 40px rgba(0,0,0,0.5);
     will-change: transform, opacity;
@@ -349,12 +381,12 @@ onUnmounted(() => {
     background: rgba(255,255,255,0.1);
     border: none;
     color: white;
-    font-size: 30px;
-    padding: 20px;
+    font-size: 24px;
+    padding: 12px;
     cursor: pointer;
     border-radius: 50%;
-    width: 80px;
-    height: 80px;
+    width: 56px;
+    height: 56px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -412,8 +444,8 @@ onUnmounted(() => {
     visibility: visible;
 }
 
-.prev-btn { left: 40px; }
-.next-btn { right: 40px; }
+.prev-btn { left: 20px; }
+.next-btn { right: 20px; }
 
 .lightbox-controls .control-btn:hover {
     background: rgba(255,255,255,0.2);

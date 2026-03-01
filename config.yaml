@@ -1,6 +1,17 @@
 ANONYMOUS_ACCESS: true
 CACHE_DIR: F:\_PicCache
 DB_PATH: data/database.db
+ENABLE_PRELOAD: true
+HOTKEYS:
+  CLOSE: Escape
+  DELETE: Delete
+  FAVORITE: f
+  NEXT: ArrowRight
+  PREV: ArrowLeft
+  RESET: h
+  ROTATE: r
+  ZOOM_IN: ArrowUp
+  ZOOM_OUT: ArrowDown
 LOG_LEVEL: WARNING
 SCAN_EXTENSIONS: .jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff
 SCAN_RECURSIVE: true

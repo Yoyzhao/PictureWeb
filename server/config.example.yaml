@@ -9,3 +9,15 @@ ANONYMOUS_ACCESS: true          # 是否开启匿名访问
 THUMBNAIL_QUALITY: 80           # 缩略图生成的质量参数 (1-100)
 SCAN_RECURSIVE: true            # 是否递归扫描文件夹
 SCAN_EXTENSIONS: ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff" # 扫描的图片后缀名
+
+# 快捷键设置
+HOTKEYS:
+  PREV: "ArrowLeft"      # 上一张
+  NEXT: "ArrowRight"     # 下一张
+  CLOSE: "Escape"        # 关闭视图
+  FAVORITE: "f"          # 收藏/取消收藏
+  DELETE: "Delete"       # 删除图片
+  ROTATE: "r"            # 旋转图片
+  ZOOM_IN: "ArrowUp"     # 放大
+  ZOOM_OUT: "ArrowDown"   # 缩小
+  RESET: "h"             # 重置视图 (Home)

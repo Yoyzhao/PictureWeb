@@ -141,11 +141,20 @@ export const useImageStore = defineStore('image', () => {
   const batchMove = async (targetFolderId: number) => {
     if (selectedImageIds.value.length === 0) return
     try {
-      const res = await batchMoveImages(selectedImageIds.value, targetFolderId)
+      const idsToMove = [...selectedImageIds.value]
+      const res = await batchMoveImages(idsToMove, targetFolderId)
       if (res.data.success) {
         ElMessage.success(`成功移动 ${res.data.moved} 张图片`)
         clearSelection()
-        fetchImages(true)
+        
+        // Remove locally from current view
+        images.value = images.value.filter(img => !idsToMove.includes(img.id))
+        total.value = Math.max(0, total.value - res.data.moved)
+        
+        // If we're now low on images, fetch more without reset
+        if (images.value.length < 20 && total.value > images.value.length) {
+          fetchImages()
+        }
       }
     } catch (error: any) {
       ElMessage.error('批量移动失败: ' + (error.response?.data?.error || error.message))
@@ -155,15 +164,29 @@ export const useImageStore = defineStore('image', () => {
   const batchDelete = async () => {
     if (selectedImageIds.value.length === 0) return
     try {
-      const res = await batchDeleteImages(selectedImageIds.value)
+      const idsToDelete = [...selectedImageIds.value]
+      const res = await batchDeleteImages(idsToDelete)
       if (res.data.success) {
         ElMessage.success(`成功将 ${res.data.deleted} 张图片移至回收站`)
         clearSelection()
-        fetchImages(true)
+        
+        // Remove locally instead of full refresh with reset
+        images.value = images.value.filter(img => !idsToDelete.includes(img.id))
+        total.value = Math.max(0, total.value - res.data.deleted)
+        
+        // If we're now low on images, fetch more without reset
+        if (images.value.length < 20 && total.value > images.value.length) {
+          fetchImages()
+        }
       }
     } catch (error: any) {
       ElMessage.error('批量删除失败: ' + (error.response?.data?.error || error.message))
     }
+  }
+
+  const removeImageLocally = (id: number) => {
+    images.value = images.value.filter(img => img.id !== id)
+    total.value = Math.max(0, total.value - 1)
   }
 
   return {
@@ -184,6 +207,7 @@ export const useImageStore = defineStore('image', () => {
     batchMove,
     batchDelete,
     batchMoveImages,
-    batchDeleteImages
+    batchDeleteImages,
+    removeImageLocally
   }
 })
