@@ -39,5 +39,6 @@ export const batchDeleteImages = (imageIds: number[]) =>
   api.post('/images/batch/delete', { image_ids: imageIds })
 
 export const getImage = (id: number) => api.get(`/images/${id}`)
+export const deleteFolder = (id: number, hard = false) => api.delete(`/folders/${id}`, { params: { hard } })
 
 export default api

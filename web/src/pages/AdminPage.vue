@@ -243,18 +243,45 @@ const handleScanFolder = async (id: number) => {
 
 const handleDeleteFolder = async (id: number) => {
   try {
-    await ElMessageBox.confirm('确定要删除此文件夹吗？这将清除所有关联的图片和权限记录，但不会删除硬盘上的物理文件。', '提示', {
+    await ElMessageBox.confirm('确定要解除此文件夹的关联吗？这将清除所有关联的图片和权限记录，但不会删除硬盘上的物理文件。', '提示', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'warning'
     })
     await api.delete(`/admin/folders/${id}`)
-    ElMessage.success('文件夹已删除')
+    ElMessage.success('文件夹关联已解除')
     fetchFolders()
     fetchPermissions()
   } catch (err) {
     if (err !== 'cancel') {
       ElMessage.error('删除失败')
+    }
+  }
+}
+
+const handleHardDeleteFolder = async (folder: any) => {
+  try {
+    await ElMessageBox.confirm(
+      `警告：确定要物理删除文件夹 "${folder.name}" 及其包含的所有图片吗？<br/><br/>
+       <strong>此操作会将文件夹移至系统回收站，并清除所有相关的索引和缓存记录。</strong>`,
+      '物理删除 (移至回收站)',
+      {
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: '确定移至回收站',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+        type: 'error'
+      }
+    )
+    
+    // Using the new deleteFolder API with hard=true
+    await api.delete(`/folders/${folder.id}`, { params: { hard: true } })
+    ElMessage.success('文件夹及其物理文件已成功删除')
+    fetchFolders()
+    fetchPermissions()
+  } catch (err: any) {
+    if (err !== 'cancel') {
+      ElMessage.error('物理删除失败: ' + (err.response?.data?.error || err.message))
     }
   }
 }
@@ -340,20 +367,21 @@ const saveSettings = async () => {
           <div class="action-bar">
             <el-button type="primary" :icon="Plus" @click="handleAddFolder">添加文件夹</el-button>
           </div>
-          <el-table :data="folders" style="width: 100%">
-            <el-table-column prop="name" label="名称" />
-            <el-table-column prop="path" label="物理路径" />
+          <el-table :data="folders" style="width: 100%" class="folders-table">
+            <el-table-column prop="name" label="名称" min-width="150" />
+            <el-table-column prop="path" label="物理路径" min-width="250" show-overflow-tooltip />
             <el-table-column label="公开状态" width="100">
               <template #default="{ row }">
                 <el-switch v-model="row.is_public" @change="toggleFolderPublic(row)" />
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="220">
+            <el-table-column label="操作" width="350">
               <template #default="{ row }">
                 <el-button-group>
                   <el-button type="primary" size="small" :icon="Edit" @click="handleEditFolder(row)">编辑</el-button>
                   <el-button type="success" size="small" @click="handleScanFolder(row.id)">扫描</el-button>
-                  <el-button type="danger" size="small" :icon="Delete" @click="handleDeleteFolder(row.id)">删除</el-button>
+                  <el-button type="warning" size="small" :icon="Delete" @click="handleDeleteFolder(row.id)">解除关联</el-button>
+                  <el-button type="danger" size="small" :icon="Delete" @click="handleHardDeleteFolder(row)">硬删除</el-button>
                 </el-button-group>
               </template>
             </el-table-column>
@@ -560,7 +588,7 @@ const saveSettings = async () => {
 
 <style scoped>
 .admin-container {
-  padding: 24px;
+  padding: 20px;
   width: 100%;
   height: 100%;
   overflow-y: auto;
@@ -583,7 +611,7 @@ const saveSettings = async () => {
 
 .admin-tabs {
   background: var(--bg-card);
-  padding: 24px;
+  padding: 30px;
   border-radius: 12px;
   border: 1px solid var(--border-color);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
@@ -621,7 +649,7 @@ const saveSettings = async () => {
 }
 
 .settings-form {
-  max-width: 600px;
+  max-width: 800px;
 }
 
 :deep(.el-tabs__item) {

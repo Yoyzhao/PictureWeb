@@ -62,21 +62,26 @@ const handleSingleDelete = (img: any) => {
   })
 }
 
-const handleBatchMove = () => {
-  if (targetFolderId.value) {
+const handleBatchMove = async () => {
+  if (!targetFolderId.value) {
+    ElMessage.warning('请选择目标文件夹')
+    return
+  }
+
+  try {
     if (isBatchMove.value) {
-      imageStore.batchMove(targetFolderId.value)
+      await imageStore.batchMove(targetFolderId.value)
     } else if (singleMoveImageId.value) {
-      imageStore.batchMoveImages([singleMoveImageId.value], targetFolderId.value)
-        .then(() => {
-          ElMessage.success('移动成功')
-          imageStore.fetchImages(true)
-        })
+      const res = await imageStore.batchMoveImages([singleMoveImageId.value], targetFolderId.value)
+      if (res.data.success) {
+        ElMessage.success('移动成功')
+        imageStore.fetchImages(true)
+      }
     }
     showMoveDialog.value = false
     targetFolderId.value = null
-  } else {
-    ElMessage.warning('请选择目标文件夹')
+  } catch (err: any) {
+    ElMessage.error('移动失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
@@ -228,7 +233,7 @@ const toggleSelection = (id: number) => {
             <el-button size="small" type="primary" link @click="imageStore.selectAll()">全选</el-button>
             <el-button size="small" type="primary" link @click="imageStore.clearSelection()">取消</el-button>
             <el-divider direction="vertical" />
-            <el-button size="small" type="primary" @click="showMoveDialog = true">移动</el-button>
+            <el-button size="small" type="primary" @click="openMoveDialog()">移动</el-button>
             <el-button size="small" type="danger" @click="handleBatchDelete">删除</el-button>
         </div>
     </footer>

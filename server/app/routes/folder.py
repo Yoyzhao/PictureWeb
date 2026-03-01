@@ -3,8 +3,55 @@ from app.utils.db import get_db
 from app.services.scanner import scan_folder
 from app.routes.auth import login_required, get_current_user
 import os
+import shutil
+from send2trash import send2trash
 
 bp = Blueprint('folder', __name__, url_prefix='/api/folders')
+
+@bp.route('/<int:id>', methods=['DELETE'])
+@login_required
+def delete_folder(id):
+    if g.user['role'] != 'admin':
+        return jsonify({'error': 'Only admins can delete folders'}), 403
+        
+    hard_delete = request.args.get('hard', 'false').lower() == 'true'
+    db = get_db()
+    
+    folder = db.execute("SELECT path FROM folders WHERE id = ?", (id,)).fetchone()
+    if not folder:
+        return jsonify({'error': 'Folder not found'}), 404
+        
+    path = folder['path']
+    
+    try:
+        if hard_delete:
+            if os.path.exists(path):
+                # Move the entire folder to system recycle bin for safety
+                send2trash(path)
+        
+        # 1. Delete related thumbnails from disk
+        images = db.execute("SELECT id FROM images WHERE folder_id = ?", (id,)).fetchall()
+        for img in images:
+            thumbnails = db.execute("SELECT file_path FROM thumbnails WHERE image_id = ?", (img['id'],)).fetchall()
+            for thumb in thumbnails:
+                if os.path.exists(thumb['file_path']):
+                    try:
+                        os.remove(thumb['file_path'])
+                    except:
+                        pass
+        
+        # 2. Delete from DB (Cascade will handle images and thumbnails records if configured, 
+        # but let's be explicit if not sure about foreign key constraints in current DB)
+        db.execute("DELETE FROM thumbnails WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
+        db.execute("DELETE FROM images WHERE folder_id = ?", (id,))
+        db.execute("DELETE FROM folders WHERE id = ?", (id,))
+        db.execute("DELETE FROM permissions WHERE folder_id = ?", (id,))
+        
+        db.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
 
 @bp.route('', methods=['GET'])
 def get_folders():
