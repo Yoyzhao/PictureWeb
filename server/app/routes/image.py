@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, send_file, abort, g
 from app.utils.db import get_db
 from app.services.thumbnail import generate_thumbnail
 from app.routes.auth import get_current_user, login_required
+from datetime import datetime
 import os
 import shutil
 from send2trash import send2trash
@@ -297,10 +298,18 @@ def get_image(id):
     return jsonify(img_dict)
 
 @bp.route('/<int:id>', methods=['PATCH'])
+@login_required
 def update_image(id):
+    if g.user['role'] == 'guest':
+        return jsonify({'error': 'Guest users cannot rename images'}), 403
+        
     db = get_db()
     data = request.json
     
+    image = db.execute("SELECT * FROM images WHERE id = ?", (id,)).fetchone()
+    if not image:
+        return jsonify({'error': 'Image not found'}), 404
+        
     fields = []
     params = []
     
@@ -309,8 +318,30 @@ def update_image(id):
         params.append(data['folder_id'])
         
     if 'file_name' in data:
-        fields.append("file_name = ?")
-        params.append(data['file_name'])
+        new_name = data['file_name']
+        old_path = os.path.normpath(image['file_path'])
+        folder_path = os.path.dirname(old_path)
+        new_path = os.path.normpath(os.path.join(folder_path, new_name))
+        
+        # Check if new name already exists
+        if os.path.exists(new_path) and old_path != new_path:
+            return jsonify({'error': 'File with this name already exists'}), 400
+            
+        try:
+            if os.path.exists(old_path):
+                os.rename(old_path, new_path)
+                
+                # Update DB fields
+                fields.append("file_name = ?")
+                params.append(new_name)
+                fields.append("file_path = ?")
+                params.append(new_path.replace('\\', '/'))
+                fields.append("modified_time = ?")
+                params.append(datetime.fromtimestamp(os.path.getmtime(new_path)))
+            else:
+                return jsonify({'error': 'File not found on disk'}), 404
+        except Exception as e:
+            return jsonify({'error': f"Failed to rename file: {str(e)}"}), 500
         
     if fields:
         params.append(id)

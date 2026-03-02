@@ -190,6 +190,27 @@ export const useImageStore = defineStore('image', () => {
     total.value = Math.max(0, total.value - 1)
   }
 
+  const renameImage = async (id: number, newName: string) => {
+    try {
+      const res = await updateImage(id, { file_name: newName })
+      if (res.data.success) {
+        // Update the image in the list
+        const index = images.value.findIndex(img => img.id === id)
+        if (index !== -1) {
+          const updatedImages = [...images.value]
+          updatedImages[index] = { ...updatedImages[index], file_name: newName }
+          images.value = updatedImages
+        }
+        return { success: true }
+      }
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.error || error.message
+      ElMessage.error('重命名失败: ' + errorMsg)
+      return { success: false, error: errorMsg }
+    }
+    return { success: false }
+  }
+
   return {
     images,
     total,
@@ -210,6 +231,7 @@ export const useImageStore = defineStore('image', () => {
     batchMoveImages,
     batchDeleteImages,
     removeImageLocally,
+    renameImage,
     gridSize
   }
 })

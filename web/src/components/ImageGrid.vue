@@ -5,7 +5,7 @@ import { useFolderStore } from '@/stores/folder'
 import { useAuthStore } from '@/stores/auth'
 import { storeToRefs } from 'pinia'
 import { useIntersectionObserver } from '@vueuse/core'
-import { Star, More, Loading, InfoFilled, Download, Delete, Rank } from '@element-plus/icons-vue'
+import { Star, More, Loading, InfoFilled, Download, Delete, Rank, Edit } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import VirtualWaterfall from './common/VirtualWaterfall.vue'
 
@@ -103,6 +103,32 @@ const handleDownload = (img: any) => {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
+}
+
+const handleRename = async (img: any) => {
+  try {
+    const result = await ElMessageBox.prompt(
+      '请输入新的文件名',
+      '重命名',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputValue: img.file_name,
+        inputPattern: /^[^\\/:*?"<>|]+$/,
+        inputErrorMessage: '文件名包含非法字符',
+      }
+    )
+    const newName = (result as any).value
+    
+    if (newName && newName !== img.file_name) {
+      const res = await imageStore.renameImage(img.id, newName)
+      if (res.success) {
+        ElMessage.success('重命名成功')
+      }
+    }
+  } catch (error) {
+    // User cancelled
+  }
 }
 
 const showDetails = (img: any) => {
@@ -208,6 +234,7 @@ const toggleSelection = (id: number) => {
                       <el-dropdown-menu>
                           <el-dropdown-item :icon="InfoFilled" @click="showDetails(img)">查看详情</el-dropdown-item>
                           <el-dropdown-item :icon="Download" @click="handleDownload(img)">下载原图</el-dropdown-item>
+                          <el-dropdown-item v-if="!isGuest" :icon="Edit" @click="handleRename(img)">重命名</el-dropdown-item>
                           <el-dropdown-item v-if="!isGuest" :icon="Rank" @click="openMoveDialog(img.id)">移动图片</el-dropdown-item>
                           <el-dropdown-item v-if="!isGuest" :icon="Delete" @click="handleSingleDelete(img)" divided style="color: #f56c6c">删除图片</el-dropdown-item>
                       </el-dropdown-menu>

@@ -296,6 +296,34 @@ const handleDelete = async () => {
   }
 }
 
+const handleRename = async () => {
+  if (!props.image) return
+  
+  try {
+    const result = await ElMessageBox.prompt(
+      '请输入新的文件名',
+      '重命名',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputValue: props.image.file_name,
+        inputPattern: /^[^\\/:*?"<>|]+$/,
+        inputErrorMessage: '文件名包含非法字符',
+      }
+    )
+    const newName = (result as any).value
+    
+    if (newName && newName !== props.image.file_name) {
+      const res = await imageStore.renameImage(props.image.id, newName)
+      if (res.success) {
+        ElMessage.success('重命名成功')
+      }
+    }
+  } catch (error) {
+    // User cancelled
+  }
+}
+
 const handleKeydown = (e: KeyboardEvent) => {
   if (!props.visible) return
   
@@ -370,7 +398,7 @@ onUnmounted(() => {
         <button title="旋转" @click="handleRotate"><el-icon><RefreshRight /></el-icon></button>
         <button title="重置" @click="handleReset"><el-icon><FullScreen /></el-icon></button>
         <button title="裁剪" class="disabled"><el-icon><Crop /></el-icon></button>
-        <button title="重命名" class="disabled"><el-icon><Edit /></el-icon></button>
+        <button title="重命名" @click="handleRename"><el-icon><Edit /></el-icon></button>
         <button 
           title="收藏" 
           class="btn-fav" 
