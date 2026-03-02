@@ -1,6 +1,6 @@
-.trae/
 data/
 logs/
 **/__pycache__/
 venv/
 node_modules/
+.trae/
