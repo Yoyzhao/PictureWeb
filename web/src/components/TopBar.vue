@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Search, Setting, Plus, Sunny, Moon } from '@element-plus/icons-vue'
+import { Search, Setting, Plus, Sunny, Moon, Expand, Fold } from '@element-plus/icons-vue'
 import { ref, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useImageStore } from '@/stores/image'
+import { useUIStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
@@ -10,7 +11,9 @@ import { useTheme } from '@/composables/useTheme'
 
 const authStore = useAuthStore()
 const imageStore = useImageStore()
+const uiStore = useUIStore()
 const { searchQuery, showAdminView } = storeToRefs(imageStore)
+const { isSidebarCollapsed } = storeToRefs(uiStore)
 const router = useRouter()
 
 const { isDark, toggleTheme } = useTheme()
@@ -38,15 +41,17 @@ const handleSettings = () => {
 </script>
 
 <template>
-  <header class="top-bar">
-    <div class="search-container">
-      <el-icon class="search-icon"><Search /></el-icon>
-      <input 
-        v-model="searchQuery" 
-        type="text" 
-        placeholder="搜索文件名..." 
-        class="search-input"
-      >
+  <header class="top-bar" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
+    <div class="left-section">
+      <div class="search-container">
+        <el-icon class="search-icon"><Search /></el-icon>
+        <input 
+          v-model="searchQuery" 
+          type="text" 
+          placeholder="搜索文件名..." 
+          class="search-input"
+        >
+      </div>
     </div>
     <div class="action-buttons">
       <el-radio-group v-model="themeValue" size="small" class="theme-toggle">
@@ -79,6 +84,18 @@ const handleSettings = () => {
   backdrop-filter: blur(10px);
   z-index: 10;
   flex-shrink: 0;
+  transition: padding-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.top-bar.sidebar-collapsed {
+  padding-left: 56px; /* 为侧边栏外的收起按钮预留空间 */
+}
+
+.left-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
 }
 
 .theme-toggle {
@@ -102,6 +119,10 @@ const handleSettings = () => {
 @media (max-width: 768px) {
     .top-bar {
         padding: 0 12px;
+    }
+    
+    .top-bar.sidebar-collapsed {
+        padding-left: 48px;
     }
 
     .search-container {

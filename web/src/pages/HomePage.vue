@@ -7,11 +7,14 @@ import Lightbox from '@/components/Lightbox.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useImageStore } from '@/stores/image'
 import { useHotkeyStore } from '@/stores/hotkey'
+import { useUIStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
 
 const imageStore = useImageStore()
 const hotkeyStore = useHotkeyStore()
+const uiStore = useUIStore()
 const { images, total, loading, showAdminView } = storeToRefs(imageStore)
+const { isSidebarCollapsed } = storeToRefs(uiStore)
 
 onMounted(() => {
   hotkeyStore.fetchHotkeys()
@@ -76,7 +79,7 @@ const handleNext = async () => {
 </script>
 
 <template>
-  <div class="app-container">
+  <div class="app-container" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
     <Sidebar />
     <main class="main-content">
       <TopBar />
