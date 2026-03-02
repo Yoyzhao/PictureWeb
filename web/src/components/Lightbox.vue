@@ -107,6 +107,7 @@ watch(() => props.image?.id, (newId) => {
 watch(() => props.visible, (visible) => {
   if (visible) {
     fetchPreloadSetting()
+    showUI.value = true // Reset UI visibility when opening
   }
 })
 
@@ -126,6 +127,7 @@ const scale = ref(1)
 const rotate = ref(0)
 const translateX = ref(0)
 const translateY = ref(0)
+const showUI = ref(true) // 控制 UI 显示/隐藏
 
 // Touch handling state
 const touchStartX = ref(0)
@@ -148,6 +150,9 @@ const handleTouchStart = (e: TouchEvent) => {
   if (e.touches.length === 1) {
     touchStartX.value = e.touches[0].clientX
     touchStartY.value = e.touches[0].clientY
+    // Reset end positions to prevent accidental swipes from previous touch data
+    touchEndX.value = e.touches[0].clientX
+    touchEndY.value = e.touches[0].clientY
     isSwiping.value = true
     isPinching.value = false
   } else if (e.touches.length === 2) {
@@ -228,6 +233,10 @@ const handleReset = () => {
   rotate.value = 0
   translateX.value = 0
   translateY.value = 0
+}
+
+const toggleUI = () => {
+  showUI.value = !showUI.value
 }
 
 const handleFavorite = async () => {
@@ -364,7 +373,8 @@ onUnmounted(() => {
   <div 
     v-if="visible" 
     class="lightbox" 
-    @click.self="emit('close')" 
+    :class="{ 'ui-visible': showUI, 'ui-hidden': !showUI }"
+    @click="toggleUI" 
     @wheel="handleWheel"
     @touchstart="handleTouchStart"
     @touchmove="handleTouchMove"
@@ -383,18 +393,18 @@ onUnmounted(() => {
 
     <div class="lightbox-content">
       <transition name="image-fade" mode="out-in">
-        <img :key="imageUrl" :src="imageUrl" :alt="image?.file_name" :style="imageStyle" />
+        <img :key="imageUrl" :src="imageUrl" :alt="image?.file_name" :style="imageStyle" @click.stop="toggleUI" />
       </transition>
-      <div class="lightbox-controls">
-        <button v-if="hasPrev" class="control-btn prev-btn" @click.stop="emit('prev')">
+      <div class="lightbox-controls" @click.stop>
+        <button v-if="hasPrev" class="control-btn prev-btn" @click.stop="emit('prev')" @touchstart.stop @touchend.stop>
           <el-icon><ArrowLeft /></el-icon>
         </button>
-        <button v-if="hasNext" class="control-btn next-btn" @click.stop="emit('next')">
+        <button v-if="hasNext" class="control-btn next-btn" @click.stop="emit('next')" @touchstart.stop @touchend.stop>
           <el-icon><ArrowRight /></el-icon>
         </button>
       </div>
       
-      <div class="lightbox-toolbar">
+      <div class="lightbox-toolbar" @touchstart.stop @touchend.stop @click.stop>
         <button title="旋转" @click="handleRotate"><el-icon><RefreshRight /></el-icon></button>
         <button title="重置" @click="handleReset"><el-icon><FullScreen /></el-icon></button>
         <button title="裁剪" class="disabled"><el-icon><Crop /></el-icon></button>
@@ -413,7 +423,7 @@ onUnmounted(() => {
         <button title="关闭" class="close-btn" @click="emit('close')"><el-icon><Close /></el-icon></button>
       </div>
 
-      <div class="image-meta" v-if="image">
+      <div class="image-meta" v-if="image" @touchstart.stop @touchend.stop @click.stop>
         <span id="meta-filename" :title="image.file_name">{{ truncatedFileName }}</span>
         <span class="meta-divider">|</span>
         <span id="meta-resolution">{{ image.width }} x {{ image.height }}</span>
@@ -548,12 +558,25 @@ onUnmounted(() => {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
+.lightbox.ui-visible .control-btn,
+.lightbox.ui-visible .lightbox-toolbar,
+.lightbox.ui-visible .image-counter,
+.lightbox.ui-visible .image-meta,
 .lightbox:hover .control-btn,
 .lightbox:hover .lightbox-toolbar,
 .lightbox:hover .image-counter,
 .lightbox:hover .image-meta {
     opacity: 1;
     visibility: visible;
+}
+
+.lightbox.ui-hidden .control-btn,
+.lightbox.ui-hidden .lightbox-toolbar,
+.lightbox.ui-hidden .image-counter,
+.lightbox.ui-hidden .image-meta {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none;
 }
 
 .prev-btn { left: 20px; }
