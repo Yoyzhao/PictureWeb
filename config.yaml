@@ -1,6 +1,6 @@
 ANONYMOUS_ACCESS: true
 CACHE_DIR: F:\_PicCache
-DB_PATH: data/database.db
+DB_PATH: D:\Workspace\_deploy\PicGallery\data\database.db
 ENABLE_PRELOAD: true
 HOTKEYS:
   CLOSE: Escape
@@ -15,5 +15,6 @@ HOTKEYS:
 LOG_LEVEL: WARNING
 SCAN_EXTENSIONS: .jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff
 SCAN_RECURSIVE: true
-SERVER_PORT: 5000
+SERVER_PORT: 5001
 THUMBNAIL_QUALITY: 90
+TRASH_DIR: F:\_PicCache\trash

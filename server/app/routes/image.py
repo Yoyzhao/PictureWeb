@@ -1,11 +1,13 @@
-from flask import Blueprint, request, jsonify, send_file, abort, g
+from flask import Blueprint, request, jsonify, send_file, abort, g, current_app
 from app.utils.db import get_db
 from app.services.thumbnail import generate_thumbnail
 from app.routes.auth import get_current_user, login_required
 from datetime import datetime
 import os
 import shutil
-from send2trash import send2trash
+import uuid
+import json
+# from send2trash import send2trash
 
 bp = Blueprint('image', __name__, url_prefix='/api/images')
 
@@ -121,8 +123,12 @@ def batch_delete_images():
     success_count = 0
     errors = []
     
+    trash_dir = current_app.config.get('TRASH_DIR', os.path.join(current_app.root_path, '..', 'data', 'trash'))
+    if not os.path.exists(trash_dir):
+        os.makedirs(trash_dir)
+        
     for img_id in image_ids:
-        image = db.execute("SELECT file_path FROM images WHERE id = ?", (img_id,)).fetchone()
+        image = db.execute("SELECT * FROM images WHERE id = ?", (img_id,)).fetchone()
         if not image:
             errors.append(f"Image {img_id} not found")
             continue
@@ -130,16 +136,46 @@ def batch_delete_images():
         file_path = os.path.normpath(image['file_path'])
         
         try:
-            # Move to trash
+            # Application-level trash
             if os.path.exists(file_path):
-                send2trash(file_path)
+                # Use a UUID to avoid name collisions in trash
+                trash_filename = f"{uuid.uuid4()}{os.path.splitext(image['file_name'])[1]}"
+                trash_path = os.path.join(trash_dir, trash_filename)
+                
+                shutil.move(file_path, trash_path)
+                
+                # Collect metadata (favorites, tags)
+                favorites = db.execute("SELECT user_id FROM user_favorites WHERE image_id = ?", (img_id,)).fetchall()
+                tags = db.execute("SELECT tag_id FROM image_tags WHERE image_id = ?", (img_id,)).fetchall()
+                
+                # Convert datetime to string for JSON serialization
+                modified_time = image['modified_time']
+                if hasattr(modified_time, 'isoformat'):
+                    modified_time = modified_time.isoformat()
+                
+                metadata = {
+                    'folder_id': image['folder_id'],
+                    'file_size': image['file_size'],
+                    'modified_time': modified_time,
+                    'width': image['width'],
+                    'height': image['height'],
+                    'format': image['format'],
+                    'favorites': [f['user_id'] for f in favorites],
+                    'tags': [t['tag_id'] for t in tags]
+                }
+                
+                # Record in trash table
+                db.execute(
+                    "INSERT INTO trash (image_id, original_path, trash_path, file_name, user_id, metadata) VALUES (?, ?, ?, ?, ?, ?)",
+                    (img_id, file_path.replace('\\', '/'), trash_path.replace('\\', '/'), image['file_name'], g.user['id'], json.dumps(metadata))
+                )
             else:
                 errors.append(f"File not found on disk: {file_path}")
             
-            # Delete from DB
+            # Delete from DB (The cascade will handle thumbnails, tags, favorites)
             db.execute("DELETE FROM images WHERE id = ?", (img_id,))
             
-            # Delete related thumbnails from disk and DB
+            # Delete related thumbnails from disk
             thumbnails = db.execute("SELECT file_path FROM thumbnails WHERE image_id = ?", (img_id,)).fetchall()
             for thumb in thumbnails:
                 thumb_path = os.path.normpath(thumb['file_path'])
@@ -148,6 +184,9 @@ def batch_delete_images():
                         os.remove(thumb_path)
                     except:
                         pass
+            # Database record deletion is handled by cascade (if configured) 
+            # or we already deleted the image which should cascade.
+            # But let's be explicit if not sure.
             db.execute("DELETE FROM thumbnails WHERE image_id = ?", (img_id,))
             
             success_count += 1
@@ -158,6 +197,188 @@ def batch_delete_images():
     return jsonify({
         'success': True, 
         'deleted': success_count, 
+        'errors': errors
+    })
+
+@bp.route('/trash/items', methods=['GET'])
+@login_required
+def get_trash_items():
+    db = get_db()
+    # Admins see all trash, users see only their own
+    if g.user['role'] == 'admin':
+        trash_items = db.execute("SELECT t.*, u.username FROM trash t JOIN users u ON t.user_id = u.id ORDER BY deleted_at DESC").fetchall()
+    else:
+        trash_items = db.execute("SELECT * FROM trash WHERE user_id = ? ORDER BY deleted_at DESC", (g.user['id'],)).fetchall()
+        
+    result = []
+    for item in trash_items:
+        d = dict(item)
+        # Serialize datetime
+        if d.get('deleted_at') and hasattr(d['deleted_at'], 'isoformat'):
+            d['deleted_at'] = d['deleted_at'].isoformat()
+            
+        # Parse metadata to get width/height for waterfall layout
+        if d.get('metadata'):
+            try:
+                meta = json.loads(d['metadata'])
+                d['width'] = meta.get('width', 0)
+                d['height'] = meta.get('height', 0)
+            except:
+                d['width'] = 0
+                d['height'] = 0
+        else:
+            d['width'] = 0
+            d['height'] = 0
+        result.append(d)
+        
+    return jsonify(result)
+
+@bp.route('/trash/<int:id>/thumbnail', methods=['GET'])
+@login_required
+def get_trash_thumbnail(id):
+    db = get_db()
+    trash_item = db.execute("SELECT * FROM trash WHERE id = ?", (id,)).fetchone()
+    if not trash_item:
+        abort(404)
+        
+    if g.user['role'] != 'admin' and trash_item['user_id'] != g.user['id']:
+        abort(403)
+        
+    # Generate thumbnail from the file in trash
+    size = request.args.get('size', 'medium')
+    try:
+        thumb_path = generate_thumbnail(trash_item['trash_path'], size)
+        return send_file(thumb_path)
+    except Exception as e:
+        current_app.logger.error(f"Thumbnail generation failed for trash item {id}: {e}")
+        # Fallback to original if thumbnail fails
+        if os.path.exists(trash_item['trash_path']):
+            return send_file(trash_item['trash_path'])
+        abort(404)
+
+@bp.route('/trash/restore', methods=['POST'])
+@login_required
+def restore_trash_images():
+    data = request.json
+    trash_ids = data.get('trash_ids', [])
+    
+    if not trash_ids:
+        return jsonify({'error': 'Missing trash_ids'}), 400
+        
+    db = get_db()
+    success_count = 0
+    errors = []
+    
+    for t_id in trash_ids:
+        trash_item = db.execute("SELECT * FROM trash WHERE id = ?", (t_id,)).fetchone()
+        if not trash_item:
+            errors.append(f"Trash item {t_id} not found")
+            continue
+            
+        # Check permissions
+        if g.user['role'] != 'admin' and trash_item['user_id'] != g.user['id']:
+            errors.append(f"Permission denied for item {t_id}")
+            continue
+            
+        trash_path = os.path.normpath(trash_item['trash_path'])
+        original_path = os.path.normpath(trash_item['original_path'])
+        
+        try:
+            if os.path.exists(trash_path):
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(original_path), exist_ok=True)
+                
+                # If file already exists at original location, find a new name
+                if os.path.exists(original_path):
+                    name, ext = os.path.splitext(trash_item['file_name'])
+                    counter = 1
+                    while os.path.exists(original_path):
+                        original_path = os.path.normpath(os.path.join(os.path.dirname(original_path), f"{name}_{counter}{ext}"))
+                        counter += 1
+                
+                shutil.move(trash_path, original_path)
+                
+                # Restore image record and metadata
+                metadata = json.loads(trash_item['metadata']) if trash_item['metadata'] else {}
+                if metadata:
+                    # Convert modified_time string back to datetime if possible
+                    mod_time = metadata.get('modified_time')
+                    if isinstance(mod_time, str):
+                        try:
+                            mod_time = datetime.fromisoformat(mod_time.replace(' ', 'T'))
+                        except:
+                            pass
+                            
+                    # Re-insert into images table
+                    cursor = db.execute(
+                        "INSERT INTO images (file_path, file_name, file_size, modified_time, width, height, format, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (original_path.replace('\\', '/'), os.path.basename(original_path), 
+                         metadata.get('file_size'), mod_time,
+                         metadata.get('width'), metadata.get('height'),
+                         metadata.get('format'), metadata.get('folder_id'))
+                    )
+                    new_image_id = cursor.lastrowid
+                    
+                    # Restore favorites
+                    for user_id in metadata.get('favorites', []):
+                        db.execute("INSERT OR IGNORE INTO user_favorites (user_id, image_id) VALUES (?, ?)", (user_id, new_image_id))
+                        
+                    # Restore tags
+                    for tag_id in metadata.get('tags', []):
+                        db.execute("INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)", (new_image_id, tag_id))
+                
+                db.execute("DELETE FROM trash WHERE id = ?", (t_id,))
+                success_count += 1
+            else:
+                errors.append(f"Trash file not found: {trash_path}")
+                db.execute("DELETE FROM trash WHERE id = ?", (t_id,)) # Clean up broken record
+        except Exception as e:
+            errors.append(f"Failed to restore {trash_item['file_name']}: {str(e)}")
+            
+    db.commit()
+    return jsonify({
+        'success': True,
+        'restored': success_count,
+        'errors': errors
+    })
+
+@bp.route('/trash/clear', methods=['POST'])
+@login_required
+def clear_trash_images():
+    data = request.json
+    trash_ids = data.get('trash_ids', []) # If empty, clear all for user
+    
+    db = get_db()
+    success_count = 0
+    errors = []
+    
+    if trash_ids:
+        items_to_delete = []
+        for t_id in trash_ids:
+            item = db.execute("SELECT * FROM trash WHERE id = ?", (t_id,)).fetchone()
+            if item:
+                if g.user['role'] == 'admin' or item['user_id'] == g.user['id']:
+                    items_to_delete.append(item)
+    else:
+        if g.user['role'] == 'admin':
+            items_to_delete = db.execute("SELECT * FROM trash").fetchall()
+        else:
+            items_to_delete = db.execute("SELECT * FROM trash WHERE user_id = ?", (g.user['id'],)).fetchall()
+            
+    for item in items_to_delete:
+        trash_path = os.path.normpath(item['trash_path'])
+        try:
+            if os.path.exists(trash_path):
+                os.remove(trash_path)
+            db.execute("DELETE FROM trash WHERE id = ?", (item['id'],))
+            success_count += 1
+        except Exception as e:
+            errors.append(f"Failed to permanently delete {item['file_name']}: {str(e)}")
+            
+    db.commit()
+    return jsonify({
+        'success': True,
+        'deleted': success_count,
         'errors': errors
     })
 
@@ -261,6 +482,10 @@ def get_images():
     result_data = []
     for img in images:
         img_dict = dict(img)
+        # Serialize datetime
+        if img_dict.get('modified_time') and hasattr(img_dict['modified_time'], 'isoformat'):
+            img_dict['modified_time'] = img_dict['modified_time'].isoformat()
+            
         # Map is_fav to is_favorite, defaulting to 0/False if not present
         img_dict['is_favorite'] = bool(img_dict.get('is_fav', 0))
         result_data.append(img_dict)
@@ -294,6 +519,10 @@ def get_image(id):
         return jsonify({'error': 'Image not found'}), 404
         
     img_dict = dict(image)
+    # Serialize datetime
+    if img_dict.get('modified_time') and hasattr(img_dict['modified_time'], 'isoformat'):
+        img_dict['modified_time'] = img_dict['modified_time'].isoformat()
+        
     img_dict['is_favorite'] = bool(img_dict.get('is_fav', 0))
     return jsonify(img_dict)
 

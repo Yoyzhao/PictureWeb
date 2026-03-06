@@ -103,3 +103,19 @@ CREATE TABLE IF NOT EXISTS permissions (
     FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE,
     UNIQUE(user_id, folder_id, permission_type)
 );
+
+-- Trash table
+CREATE TABLE IF NOT EXISTS trash (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    image_id INTEGER,
+    original_path TEXT NOT NULL,
+    trash_path TEXT NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    user_id INTEGER NOT NULL,
+    metadata TEXT, -- JSON stored metadata (favorites, tags, etc.)
+    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_trash_user_id ON trash(user_id);
+CREATE INDEX IF NOT EXISTS idx_trash_deleted_at ON trash(deleted_at);

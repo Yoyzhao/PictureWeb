@@ -21,7 +21,7 @@ def create_app(test_config=None):
             config = yaml.safe_load(f)
             
             # Resolve relative paths relative to project root
-            for key in ['DB_PATH', 'CACHE_DIR']:
+            for key in ['DB_PATH', 'CACHE_DIR', 'TRASH_DIR']:
                 if key in config and not os.path.isabs(config[key]):
                     config[key] = os.path.abspath(os.path.join(project_root, config[key]))
             

@@ -89,7 +89,13 @@ def clear_cache():
 def get_users():
     db = get_db()
     users = db.execute("SELECT id, username, role, created_at FROM users").fetchall()
-    return jsonify([dict(user) for user in users])
+    result = []
+    for user in users:
+        u_dict = dict(user)
+        if u_dict.get('created_at') and hasattr(u_dict['created_at'], 'isoformat'):
+            u_dict['created_at'] = u_dict['created_at'].isoformat()
+        result.append(u_dict)
+    return jsonify(result)
 
 @bp.route('/users', methods=['POST'])
 def add_user():
@@ -164,7 +170,15 @@ def get_folders():
         FROM folders
     """
     folders = db.execute(query).fetchall()
-    return jsonify([dict(f) for f in folders])
+    result = []
+    for f in folders:
+        d = dict(f)
+        if d.get('created_at') and hasattr(d['created_at'], 'isoformat'):
+            d['created_at'] = d['created_at'].isoformat()
+        if d.get('updated_at') and hasattr(d['updated_at'], 'isoformat'):
+            d['updated_at'] = d['updated_at'].isoformat()
+        result.append(d)
+    return jsonify(result)
 
 @bp.route('/folders/<int:id>', methods=['DELETE'])
 def delete_folder(id):
@@ -276,7 +290,7 @@ def update_settings():
         # Reload config in current app (simplified)
         for key, value in data.items():
             # Resolve relative paths relative to project root
-            if key in ['DB_PATH', 'CACHE_DIR'] and not os.path.isabs(value):
+            if key in ['DB_PATH', 'CACHE_DIR', 'TRASH_DIR'] and not os.path.isabs(value):
                 value = os.path.abspath(os.path.join(project_root, value))
             # Ensure THUMBNAIL_QUALITY is an integer
             if key == 'THUMBNAIL_QUALITY' and value is not None:

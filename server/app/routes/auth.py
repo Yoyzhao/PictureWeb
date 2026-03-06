@@ -8,27 +8,33 @@ bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
 def get_current_user():
     auth_header = request.headers.get('Authorization')
-    if not auth_header:
+    token = None
+    
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header.split(' ')[1]
+    else:
+        # Also check query parameter for cases like image <img> tags
+        token = request.args.get('token')
+        
+    if not token:
         return None
     
     # In a real app, verify JWT. For now, we use simple mock tokens.
     db = get_db()
-    if auth_header.startswith('Bearer '):
-        token = auth_header.split(' ')[1]
+    
+    # Backward compatibility for existing hardcoded tokens
+    if token == 'admin-token':
+        return db.execute("SELECT * FROM users WHERE username = 'admin'").fetchone()
+    elif token == 'guest-token':
+        return db.execute("SELECT * FROM users WHERE username = 'guest'").fetchone()
         
-        # Backward compatibility for existing hardcoded tokens
-        if token == 'admin-token':
-            return db.execute("SELECT * FROM users WHERE username = 'admin'").fetchone()
-        elif token == 'guest-token':
-            return db.execute("SELECT * FROM users WHERE username = 'guest'").fetchone()
-            
-        # New token format: token-{id}
-        if token.startswith('token-'):
-            try:
-                user_id = int(token.split('-')[1])
-                return db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-            except:
-                pass
+    # New token format: token-{id}
+    if token.startswith('token-'):
+        try:
+            user_id = int(token.split('-')[1])
+            return db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        except:
+            pass
                 
     return None
 

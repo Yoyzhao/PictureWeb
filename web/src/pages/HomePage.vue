@@ -3,6 +3,7 @@ import Sidebar from '@/components/Sidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import ImageGrid from '@/components/ImageGrid.vue'
 import AdminPage from '@/pages/AdminPage.vue'
+import TrashPage from '@/pages/TrashPage.vue'
 import Lightbox from '@/components/Lightbox.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useImageStore } from '@/stores/image'
@@ -13,7 +14,7 @@ import { storeToRefs } from 'pinia'
 const imageStore = useImageStore()
 const hotkeyStore = useHotkeyStore()
 const uiStore = useUIStore()
-const { images, total, loading, showAdminView } = storeToRefs(imageStore)
+const { images, total, loading, showAdminView, showTrash } = storeToRefs(imageStore)
 const { isSidebarCollapsed } = storeToRefs(uiStore)
 
 onMounted(() => {
@@ -84,8 +85,9 @@ const handleNext = async () => {
     <main class="main-content">
       <TopBar />
       <transition name="fade-slide" mode="out-in">
-        <ImageGrid v-if="!showAdminView" @open-lightbox="handleOpenLightbox" />
-        <AdminPage v-else />
+        <AdminPage v-if="showAdminView" />
+        <TrashPage v-else-if="showTrash" />
+        <ImageGrid v-else @open-lightbox="handleOpenLightbox" />
       </transition>
     </main>
     

@@ -4,7 +4,8 @@ from app.services.scanner import scan_folder
 from app.routes.auth import login_required, get_current_user
 import os
 import shutil
-from send2trash import send2trash
+# from send2trash import send2trash
+import uuid
 from threading import Thread
 
 bp = Blueprint('folder', __name__, url_prefix='/api/folders')
@@ -45,8 +46,17 @@ def delete_folder(id):
     try:
         if hard_delete:
             if os.path.exists(path):
-                # Move the entire folder to system recycle bin for safety
-                send2trash(path)
+                # Move the entire folder to application-level trash for safety
+                trash_dir = current_app.config.get('TRASH_DIR', os.path.join(current_app.root_path, '..', 'data', 'trash'))
+                if not os.path.exists(trash_dir):
+                    os.makedirs(trash_dir)
+                
+                # We don't record the whole folder in the trash table for now, 
+                # just the files inside to keep it simple, or just move the folder.
+                # Let's just move the folder to a unique name in trash.
+                trash_folder_name = f"folder_{uuid.uuid4()}_{os.path.basename(path.rstrip('/\\\\'))}"
+                trash_path = os.path.join(trash_dir, trash_folder_name)
+                shutil.move(path, trash_path)
         
         # 1. Delete related thumbnails from disk
         images = db.execute("SELECT id FROM images WHERE folder_id = ?", (id,)).fetchall()
@@ -93,7 +103,17 @@ def get_folders():
         # Anonymous users can only see public folders
         folders = db.execute("SELECT id, path, name, user_id, is_public, scan_status, scan_total, scan_processed, scan_error, created_at, updated_at FROM folders WHERE is_public = 1").fetchall()
         
-    return jsonify([dict(f) for f in folders])
+    result = []
+    for f in folders:
+        d = dict(f)
+        # Serialize datetime
+        if d.get('created_at') and hasattr(d['created_at'], 'isoformat'):
+            d['created_at'] = d['created_at'].isoformat()
+        if d.get('updated_at') and hasattr(d['updated_at'], 'isoformat'):
+            d['updated_at'] = d['updated_at'].isoformat()
+        result.append(d)
+        
+    return jsonify(result)
 
 @bp.route('', methods=['POST'])
 @login_required

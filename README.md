@@ -11,14 +11,14 @@ PicGallery 是一个轻量级、响应式的个人相册管理系统。它支持
   - 图片顺时针 90 度旋转。
   - 支持上一张/下一张快速切换。
   - 自动隐藏/显示控制栏。
-- **图片管理**: 支持批量移动、批量删除（进入系统回收站）、下载原图、查看详细元数据。
+- **图片管理**: 支持批量移动、批量删除（应用内回收站）、下载原图、查看详细元数据。
 - **收藏夹**: 一键收藏心仪图片，支持仅查看收藏内容。
 - **后台管理**: 管理扫描目录、用户权限以及查看扫描统计结果。
 
 ## 🛠️ 技术栈
 
 - **前端**: Vue 3 (Composition API), Vite, TypeScript, Pinia, Element Plus, Axios.
-- **后端**: Python, Flask, SQLite3, Pillow (图片处理), send2trash (安全删除).
+- **后端**: Python, Flask, SQLite3, Pillow (图片处理).
 - **样式**: CSS Variables, Tailwind-like utility classes.
 
 ## 🚀 快速开始

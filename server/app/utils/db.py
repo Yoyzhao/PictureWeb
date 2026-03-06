@@ -1,6 +1,22 @@
 import sqlite3
 import os
+import datetime
 from flask import current_app, g
+
+# --- Custom Timestamp Converter to handle ISO formats with 'T' ---
+def convert_timestamp_iso(val):
+    if not val:
+        return None
+    try:
+        s = val.decode('utf-8')
+        # Handle both space and T as separator
+        return datetime.datetime.fromisoformat(s.replace(' ', 'T'))
+    except Exception:
+        return None
+
+# Register the converter for TIMESTAMP and DATETIME
+sqlite3.register_converter("TIMESTAMP", convert_timestamp_iso)
+sqlite3.register_converter("DATETIME", convert_timestamp_iso)
 
 def get_db():
     if 'db' not in g:
@@ -24,6 +40,40 @@ def close_db(e=None):
     if db is not None:
         db.close()
 
+def migrate_db(db):
+    """
+    Check and perform database migrations.
+    This ensures that existing databases get updated with new columns/tables.
+    """
+    try:
+        # 1. 检查并创建 trash 表（如果完全不存在）
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS trash (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                image_id INTEGER,
+                original_path TEXT NOT NULL,
+                trash_path TEXT NOT NULL,
+                file_name VARCHAR(255) NOT NULL,
+                user_id INTEGER NOT NULL,
+                metadata TEXT,
+                deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        
+        # 2. 检查并补全 metadata 字段（如果表存在但字段缺失）
+        cursor = db.execute("PRAGMA table_info(trash)")
+        columns = [row['name'] for row in cursor.fetchall()]
+        
+        if columns and 'metadata' not in columns:
+            print("Migrating database: Adding 'metadata' column to 'trash' table...")
+            db.execute("ALTER TABLE trash ADD COLUMN metadata TEXT")
+            db.commit()
+            print("Migration successful.")
+            
+    except Exception as e:
+        print(f"Migration error: {e}")
+
 def init_db():
     db = get_db()
     
@@ -32,6 +82,9 @@ def init_db():
     
     with open(schema_path, 'r', encoding='utf-8') as f:
         db.executescript(f.read())
+    
+    # Run migrations for existing database
+    migrate_db(db)
     
     # Check if admin user exists, if not create one
     # This is a basic check to ensure we have at least one user

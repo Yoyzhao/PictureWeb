@@ -41,4 +41,9 @@ export const batchDeleteImages = (imageIds: number[]) =>
 export const getImage = (id: number) => api.get(`/images/${id}`)
 export const deleteFolder = (id: number, hard = false) => api.delete(`/folders/${id}`, { params: { hard } })
 
+// Trash APIs
+export const getTrash = () => api.get('/images/trash/items')
+export const restoreTrash = (trashIds: number[]) => api.post('/images/trash/restore', { trash_ids: trashIds })
+export const clearTrash = (trashIds?: number[]) => api.post('/images/trash/clear', { trash_ids: trashIds })
+
 export default api

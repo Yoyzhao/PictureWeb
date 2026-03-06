@@ -1,6 +1,15 @@
 import { defineStore, storeToRefs } from 'pinia'
 import { ref, shallowRef, watch } from 'vue'
-import { getImages, updateImage, batchMoveImages, batchDeleteImages, toggleImageFavorite } from '../api'
+import { 
+  getImages, 
+  updateImage, 
+  batchMoveImages, 
+  batchDeleteImages, 
+  toggleImageFavorite,
+  getTrash,
+  restoreTrash,
+  clearTrash
+} from '../api'
 import { useFolderStore } from './folder'
 import { useAuthStore } from './auth'
 import { ElMessage } from 'element-plus'
@@ -26,6 +35,7 @@ export const useImageStore = defineStore('image', () => {
   const loading = ref(false)
   const showOnlyFavorites = ref(false)
   const showAdminView = ref(false)
+  const showTrash = ref(false)
   const sortBy = ref('modified_time')
   const sortOrder = ref('DESC')
   const searchQuery = ref('')
@@ -190,6 +200,54 @@ export const useImageStore = defineStore('image', () => {
     total.value = Math.max(0, total.value - 1)
   }
 
+  const trashItems = ref<any[]>([])
+  const trashLoading = ref(false)
+
+  const fetchTrash = async () => {
+    trashLoading.value = true
+    try {
+      const res = await getTrash()
+      trashItems.value = res.data
+    } catch (error: any) {
+      ElMessage.error('获取回收站失败: ' + (error.response?.data?.error || error.message))
+    } finally {
+      trashLoading.value = false
+    }
+  }
+
+  const restoreFromTrash = async (trashIds: number[]) => {
+    try {
+      const res = await restoreTrash(trashIds)
+      if (res.data.success) {
+        ElMessage.success(`成功恢复 ${res.data.restored} 张图片`)
+        trashItems.value = trashItems.value.filter(item => !trashIds.includes(item.id))
+        return true
+      }
+    } catch (error: any) {
+      ElMessage.error('恢复失败: ' + (error.response?.data?.error || error.message))
+    }
+    return false
+  }
+
+  const permanentlyDelete = async (trashIds?: number[]) => {
+    try {
+      const res = await clearTrash(trashIds)
+      if (res.data.success) {
+        if (trashIds) {
+          ElMessage.success(`成功彻底删除 ${res.data.deleted} 张图片`)
+          trashItems.value = trashItems.value.filter(item => !trashIds.includes(item.id))
+        } else {
+          ElMessage.success('已清空回收站')
+          trashItems.value = []
+        }
+        return true
+      }
+    } catch (error: any) {
+      ElMessage.error('删除失败: ' + (error.response?.data?.error || error.message))
+    }
+    return false
+  }
+
   const renameImage = async (id: number, newName: string) => {
     try {
       const res = await updateImage(id, { file_name: newName })
@@ -221,6 +279,7 @@ export const useImageStore = defineStore('image', () => {
     sortOrder,
     searchQuery,
     selectedImageIds,
+    showTrash,
     fetchImages,
     toggleFavorite,
     toggleImageSelection,
@@ -232,6 +291,11 @@ export const useImageStore = defineStore('image', () => {
     batchDeleteImages,
     removeImageLocally,
     renameImage,
+    trashItems,
+    trashLoading,
+    fetchTrash,
+    restoreFromTrash,
+    permanentlyDelete,
     gridSize
   }
 })

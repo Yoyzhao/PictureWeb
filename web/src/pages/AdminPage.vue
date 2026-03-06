@@ -548,84 +548,133 @@ const saveSettings = async () => {
 
       <el-tab-pane label="系统设置" name="settings">
         <div class="tab-content settings-form">
-          <el-form :model="settings" label-width="150px">
-            <el-form-item label="服务端口">
-              <el-input-number v-model="settings.SERVER_PORT" :min="1" :max="65535" />
-            </el-form-item>
-            <el-form-item label="数据库路径">
-              <el-input v-model="settings.DB_PATH" />
-            </el-form-item>
-            <el-form-item label="缓存目录">
-              <el-input v-model="settings.CACHE_DIR" />
-            </el-form-item>
-            <el-form-item label="日志级别">
-              <el-select v-model="settings.LOG_LEVEL">
-                <el-option label="DEBUG" value="DEBUG" />
-                <el-option label="INFO" value="INFO" />
-                <el-option label="WARNING" value="WARNING" />
-                <el-option label="ERROR" value="ERROR" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="匿名访问">
-              <el-switch v-model="settings.ANONYMOUS_ACCESS" />
-            </el-form-item>
-            <el-form-item label="缩略图质量">
-              <el-slider v-model="settings.THUMBNAIL_QUALITY" :min="10" :max="100" :format-tooltip="(val) => val + '%'" />
-              <div class="form-tip">
-                设置 JPEG 压缩质量（10-100）。数值越高图片越清晰，但占用空间越大。
-                <br/>
-                <span class="warning-text">注意：修改仅对<strong>新生成</strong>的缩略图生效。</span>
-                若要更新现有图片，请执行 <el-link type="primary" :underline="false" @click="handleClearCache" style="font-size: 12px; vertical-align: baseline;">清理缓存</el-link>。
+          <el-form :model="settings" label-width="120px" label-position="left">
+            <div class="settings-section">
+              <div class="section-title">
+                <el-icon><Setting /></el-icon>
+                <span>基础设置</span>
               </div>
-            </el-form-item>
-            <el-divider content-position="left">扫描设置</el-divider>
-            <el-form-item label="递归扫描">
-              <el-switch v-model="settings.SCAN_RECURSIVE" />
-              <div class="form-tip">开启后将扫描子文件夹中的图片</div>
-            </el-form-item>
-            <el-form-item label="支持格式">
-              <el-input v-model="settings.SCAN_EXTENSIONS" placeholder="例如: .jpg,.png,.webp" />
-              <div class="form-tip">多个格式请用英文逗号隔开</div>
-            </el-form-item>
-            <el-divider content-position="left">性能与缓存</el-divider>
-            <el-form-item label="图片预加载">
-              <el-switch v-model="settings.ENABLE_PRELOAD" />
-              <div class="form-tip">浏览大图时自动预加载下一张，提升浏览体验</div>
-            </el-form-item>
-            <el-divider content-position="left">操作热键</el-divider>
-            <div class="hotkeys-header">
-              <div class="form-tip">点击按钮后按键盘任意键进行绑定。</div>
-              <el-button size="small" :icon="RefreshLeft" @click="resetHotkeys">恢复默认</el-button>
-            </div>
-            <div class="hotkeys-grid">
-              <div v-for="(label, key) in hotkeyLabels" :key="key" class="hotkey-item">
-                <span class="hotkey-label">{{ label }}</span>
-                <el-button 
-                  class="hotkey-btn"
-                  :type="recordingHotkey === key ? 'danger' : 'default'"
-                  @click="startRecording(key as string)"
-                >
-                  {{ recordingHotkey === key ? '请按键...' : hotkeys[key as keyof typeof hotkeys] }}
-                </el-button>
+              <div class="section-content">
+                <el-row :gutter="20">
+                  <el-col :span="12">
+                    <el-form-item label="服务端口">
+                      <el-input-number v-model="settings.SERVER_PORT" :min="1" :max="65535" style="width: 100%" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item label="日志级别">
+                      <el-select v-model="settings.LOG_LEVEL" style="width: 100%">
+                        <el-option label="DEBUG" value="DEBUG" />
+                        <el-option label="INFO" value="INFO" />
+                        <el-option label="WARNING" value="WARNING" />
+                        <el-option label="ERROR" value="ERROR" />
+                      </el-select>
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                
+                <el-form-item label="数据库路径">
+                  <el-input v-model="settings.DB_PATH" />
+                </el-form-item>
+                
+                <el-form-item label="回收站目录">
+                  <el-input v-model="settings.TRASH_DIR" />
+                  <div class="form-tip">删除文件时临时存放的目录</div>
+                </el-form-item>
+
+                <el-form-item label="匿名访问">
+                  <el-switch v-model="settings.ANONYMOUS_ACCESS" />
+                  <span class="switch-tip">开启后未登录用户也可查看公开文件夹</span>
+                </el-form-item>
               </div>
             </div>
-            <el-form-item label="缓存占用">
-              <div class="cache-info">
-                <span class="cache-size" :class="{ 'error-text': cacheStats.error }">{{ cacheStats.size_human }}</span>
-                <el-button 
-                  type="danger" 
-                  size="small" 
-                  :loading="isClearingCache"
-                  @click="handleClearCache"
-                  style="margin-left: 15px"
-                >清理缓存</el-button>
+
+            <div class="settings-section">
+              <div class="section-title">
+                <el-icon><RefreshLeft /></el-icon>
+                <span>扫描与性能</span>
               </div>
-              <div class="form-tip" v-if="cacheStats.error" style="color: var(--el-color-danger)">{{ cacheStats.error }}</div>
-              <div class="form-tip">清理缩略图缓存，不会影响原始图片</div>
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" @click="saveSettings">保存设置</el-button>
-            </el-form-item>
+              <div class="section-content">
+                <el-form-item label="递归扫描">
+                  <el-switch v-model="settings.SCAN_RECURSIVE" />
+                  <span class="switch-tip">开启后将扫描子文件夹中的图片</span>
+                </el-form-item>
+
+                <el-form-item label="支持格式">
+                  <el-input v-model="settings.SCAN_EXTENSIONS" placeholder="例如: .jpg,.png,.webp" />
+                  <div class="form-tip">多个格式请用英文逗号隔开</div>
+                </el-form-item>
+
+                <el-form-item label="图片预加载">
+                  <el-switch v-model="settings.ENABLE_PRELOAD" />
+                  <span class="switch-tip">浏览大图时自动预加载下一张，提升浏览体验</span>
+                </el-form-item>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="section-title">
+                <el-icon><Folder /></el-icon>
+                <span>缓存管理</span>
+              </div>
+              <div class="section-content">
+                <el-form-item label="缓存目录">
+                  <el-input v-model="settings.CACHE_DIR" />
+                </el-form-item>
+
+                <el-form-item label="缩略图质量">
+                  <el-slider v-model="settings.THUMBNAIL_QUALITY" :min="10" :max="100" :format-tooltip="(val) => val + '%'" />
+                  <div class="form-tip">
+                    设置 JPEG 压缩质量（10-100）。数值越高图片越清晰，但占用空间越大。
+                    <span class="warning-text">注意：修改仅对新生成的缩略图生效。</span>
+                  </div>
+                </el-form-item>
+
+                <el-form-item label="缓存占用">
+                  <div class="cache-info">
+                    <span class="cache-size" :class="{ 'error-text': cacheStats.error }">{{ cacheStats.size_human }}</span>
+                    <el-button 
+                      type="danger" 
+                      size="small" 
+                      :loading="isClearingCache"
+                      @click="handleClearCache"
+                      style="margin-left: 15px"
+                    >清理缓存</el-button>
+                  </div>
+                  <div class="form-tip" v-if="cacheStats.error" style="color: var(--el-color-danger)">{{ cacheStats.error }}</div>
+                  <div class="form-tip">清理缩略图缓存，不会影响原始图片</div>
+                </el-form-item>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="section-title">
+                <el-icon><Pointer /></el-icon>
+                <span>操作热键</span>
+              </div>
+              <div class="section-content">
+                <div class="hotkeys-header">
+                  <div class="form-tip">点击按钮后按键盘任意键进行绑定。</div>
+                  <el-button size="small" :icon="RefreshLeft" @click="resetHotkeys">恢复默认</el-button>
+                </div>
+                <div class="hotkeys-grid">
+                  <div v-for="(label, key) in hotkeyLabels" :key="key" class="hotkey-item">
+                    <span class="hotkey-label">{{ label }}</span>
+                    <el-button 
+                      class="hotkey-btn"
+                      :type="recordingHotkey === key ? 'danger' : 'default'"
+                      @click="startRecording(key as string)"
+                    >
+                      {{ recordingHotkey === key ? '请按键...' : hotkeys[key as keyof typeof hotkeys] }}
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <el-button type="primary" size="large" @click="saveSettings" style="width: 200px">保存设置</el-button>
+            </div>
           </el-form>
         </div>
       </el-tab-pane>
@@ -765,6 +814,45 @@ const saveSettings = async () => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   margin-top: 4px;
+  line-height: 1.4;
+}
+
+.switch-tip {
+  margin-left: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.settings-section {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+  border: 1px solid var(--border-color);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.section-title .el-icon {
+  font-size: 18px;
+}
+
+.form-actions {
+  margin-top: 32px;
+  display: flex;
+  justify-content: center;
+  padding-bottom: 20px;
 }
 
 .cache-info {
@@ -838,7 +926,37 @@ const saveSettings = async () => {
 }
 
 .settings-form {
-  max-width: 800px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+:deep(.el-form-item) {
+  margin-bottom: 24px;
+}
+
+:deep(.el-form-item__label) {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+:deep(.el-input__wrapper),
+:deep(.el-select__wrapper) {
+  background-color: var(--bg-card) !important;
+  box-shadow: 0 0 0 1px var(--border-color) inset !important;
+}
+
+:deep(.el-input__inner) {
+  color: var(--text-primary) !important;
+}
+
+.hotkeys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 20px;
+  padding: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
 }
 
 :deep(.el-tabs__item) {

@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useImageStore } from '@/stores/image'
 import { useUIStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
-import { Folder, Plus, Refresh, Monitor, Star, SwitchButton, User, Setting, Expand, Fold } from '@element-plus/icons-vue'
+import { Folder, Plus, Refresh, Monitor, Star, SwitchButton, User, Setting, Expand, Fold, Delete } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 const folderStore = useFolderStore()
@@ -14,7 +14,7 @@ const { folders, currentFolderId } = storeToRefs(folderStore)
 const authStore = useAuthStore()
 const { isLoggedIn, user } = storeToRefs(authStore)
 const imageStore = useImageStore()
-const { showOnlyFavorites, showAdminView } = storeToRefs(imageStore)
+const { showOnlyFavorites, showAdminView, showTrash } = storeToRefs(imageStore)
 const uiStore = useUIStore()
 const { isSidebarCollapsed } = storeToRefs(uiStore)
 
@@ -38,19 +38,30 @@ onMounted(() => {
 const handleSelect = (id: number | undefined) => {
   showAdminView.value = false
   showOnlyFavorites.value = false
+  showTrash.value = false
   folderStore.selectFolder(id as any)
 }
 
 const handleSelectFavorites = () => {
   showAdminView.value = false
   showOnlyFavorites.value = true
+  showTrash.value = false
   folderStore.selectFolder(undefined as any)
 }
 
 const handleSelectAdmin = () => {
   showAdminView.value = true
   showOnlyFavorites.value = false
+  showTrash.value = false
   folderStore.selectFolder(undefined as any)
+}
+
+const handleSelectTrash = () => {
+  showAdminView.value = false
+  showOnlyFavorites.value = false
+  showTrash.value = true
+  folderStore.selectFolder(undefined as any)
+  imageStore.fetchTrash()
 }
 
 const handleLogin = async () => {
@@ -113,11 +124,14 @@ const handleAddFolder = async () => {
     <nav class="sidebar-nav">
         <div class="nav-group">
             <div class="nav-title" v-if="!isSidebarCollapsed">管理</div>
-            <a href="#" class="nav-item" :title="isSidebarCollapsed ? '所有照片' : ''" :class="{ active: currentFolderId === undefined && !showOnlyFavorites && !showAdminView }" @click.prevent="handleSelect(undefined)">
+            <a href="#" class="nav-item" :title="isSidebarCollapsed ? '所有照片' : ''" :class="{ active: currentFolderId === undefined && !showOnlyFavorites && !showAdminView && !showTrash }" @click.prevent="handleSelect(undefined)">
                 <el-icon><Folder /></el-icon> <span v-if="!isSidebarCollapsed">所有照片</span>
             </a>
             <a v-if="isLoggedIn" href="#" class="nav-item" :title="isSidebarCollapsed ? '收藏夹' : ''" :class="{ active: showOnlyFavorites }" @click.prevent="handleSelectFavorites">
                 <el-icon><Star /></el-icon> <span v-if="!isSidebarCollapsed">收藏夹</span>
+            </a>
+            <a v-if="isLoggedIn && !isGuest" href="#" class="nav-item" :title="isSidebarCollapsed ? '回收站' : ''" :class="{ active: showTrash }" @click.prevent="handleSelectTrash">
+                <el-icon><Delete /></el-icon> <span v-if="!isSidebarCollapsed">回收站</span>
             </a>
             <a v-if="isLoggedIn && user?.role === 'admin'" href="#" class="nav-item" :title="isSidebarCollapsed ? '系统管理' : ''" :class="{ active: showAdminView }" @click.prevent="handleSelectAdmin">
                 <el-icon><Setting /></el-icon> <span v-if="!isSidebarCollapsed">系统管理</span>
