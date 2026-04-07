@@ -202,11 +202,24 @@ const handleTouchEnd = (e: TouchEvent) => {
     const deltaY = touchEndY.value - touchStartY.value
     const threshold = 50
 
+    // Horizontal swipe
     if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > threshold) {
       if (deltaX > 0 && props.hasPrev) {
         goPrev()
       } else if (deltaX < 0 && props.hasNext) {
         goNext()
+      }
+    } 
+    // Vertical swipe
+    else if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > threshold) {
+      if (deltaY > 0 && props.hasPrev) {
+        // Swipe Down -> Previous image
+        transitionName.value = 'slide-down'
+        emit('prev')
+      } else if (deltaY < 0 && props.hasNext) {
+        // Swipe Up -> Next image
+        transitionName.value = 'slide-up'
+        emit('next')
       }
     }
   }
@@ -528,6 +541,34 @@ onUnmounted(() => {
 .slide-right-leave-to {
     opacity: 0;
     transform: translateX(100px);
+}
+
+/* 图片切换动画 - 向上滑动 (下一页) */
+.slide-up-enter-active,
+.slide-up-leave-active {
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.slide-up-enter-from {
+    opacity: 0;
+    transform: translateY(100px);
+}
+.slide-up-leave-to {
+    opacity: 0;
+    transform: translateY(-100px);
+}
+
+/* 图片切换动画 - 向下滑动 (上一页) */
+.slide-down-enter-active,
+.slide-down-leave-active {
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.slide-down-enter-from {
+    opacity: 0;
+    transform: translateY(-100px);
+}
+.slide-down-leave-to {
+    opacity: 0;
+    transform: translateY(100px);
 }
 
 .lightbox-controls .control-btn {
