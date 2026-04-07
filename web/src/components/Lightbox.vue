@@ -139,6 +139,18 @@ const initialScale = ref(1)
 const isSwiping = ref(false)
 const isPinching = ref(false)
 
+const transitionName = ref('slide-left')
+
+const goNext = () => {
+  transitionName.value = 'slide-left'
+  emit('next')
+}
+
+const goPrev = () => {
+  transitionName.value = 'slide-right'
+  emit('prev')
+}
+
 const getDistance = (touches: TouchList) => {
   return Math.hypot(
     touches[0].clientX - touches[1].clientX,
@@ -192,9 +204,9 @@ const handleTouchEnd = (e: TouchEvent) => {
 
     if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > threshold) {
       if (deltaX > 0 && props.hasPrev) {
-        emit('prev')
+        goPrev()
       } else if (deltaX < 0 && props.hasNext) {
-        emit('next')
+        goNext()
       }
     }
   }
@@ -248,9 +260,9 @@ const handleFavorite = async () => {
     // BEFORE the store update removes this image from the list.
     if (isCurrentlyFavorite && isInFavoritesView) {
       if (props.hasNext) {
-        emit('next')
+        goNext()
       } else if (props.hasPrev) {
-        emit('prev')
+        goPrev()
       } else {
         emit('close')
       }
@@ -283,9 +295,9 @@ const handleDelete = async () => {
       
       // 1. Move to next/prev image first to keep the lightbox open
       if (props.hasNext) {
-        emit('next')
+        goNext()
       } else if (props.hasPrev) {
-        emit('prev')
+        goPrev()
       } else {
         emit('close')
       }
@@ -340,8 +352,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   const hk = hotkeys.value
 
   if (key === hk.CLOSE) emit('close')
-  if (key === hk.PREV && props.hasPrev) emit('prev')
-  if (key === hk.NEXT && props.hasNext) emit('next')
+  if (key === hk.PREV && props.hasPrev) goPrev()
+  if (key === hk.NEXT && props.hasNext) goNext()
   if (key === hk.DELETE) {
     e.preventDefault()
     handleDelete()
@@ -392,14 +404,16 @@ onUnmounted(() => {
     </div>
 
     <div class="lightbox-content">
-      <transition name="image-fade" mode="out-in">
-        <img :key="imageUrl" :src="imageUrl" :alt="image?.file_name" :style="imageStyle" @click.stop="toggleUI" />
+      <transition :name="transitionName">
+        <div :key="imageUrl" class="image-wrapper">
+          <img :src="imageUrl" :alt="image?.file_name" :style="imageStyle" @click.stop="toggleUI" draggable="false" />
+        </div>
       </transition>
       <div class="lightbox-controls" @click.stop>
-        <button v-if="hasPrev" class="control-btn prev-btn" @click.stop="emit('prev')" @touchstart.stop @touchend.stop>
+        <button v-if="hasPrev" class="control-btn prev-btn" @click.stop="goPrev" @touchstart.stop @touchend.stop>
           <el-icon><ArrowLeft /></el-icon>
         </button>
-        <button v-if="hasNext" class="control-btn next-btn" @click.stop="emit('next')" @touchstart.stop @touchend.stop>
+        <button v-if="hasNext" class="control-btn next-btn" @click.stop="goNext" @touchstart.stop @touchend.stop>
           <el-icon><ArrowRight /></el-icon>
         </button>
       </div>
@@ -466,30 +480,54 @@ onUnmounted(() => {
     justify-content: center;
 }
 
-.lightbox-content img {
+.image-wrapper {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: transform, opacity;
+}
+
+.lightbox-content img {
+    max-width: 100%;
+    max-height: 100%;
     object-fit: contain;
     box-shadow: 0 0 40px rgba(0,0,0,0.5);
-    will-change: transform, opacity;
+    will-change: transform;
     user-select: none;
     -webkit-user-drag: none;
 }
 
-/* 图片切换动画 */
-.image-fade-enter-active,
-.image-fade-leave-active {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* 图片切换动画 - 向左滑动 (下一页) */
+.slide-left-enter-active,
+.slide-left-leave-active {
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.slide-left-enter-from {
+    opacity: 0;
+    transform: translateX(100px);
+}
+.slide-left-leave-to {
+    opacity: 0;
+    transform: translateX(-100px);
 }
 
-.image-fade-enter-from {
-    opacity: 0;
-    transform: scale(0.95);
+/* 图片切换动画 - 向右滑动 (上一页) */
+.slide-right-enter-active,
+.slide-right-leave-active {
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
-
-.image-fade-leave-to {
+.slide-right-enter-from {
     opacity: 0;
-    transform: scale(1.05);
+    transform: translateX(-100px);
+}
+.slide-right-leave-to {
+    opacity: 0;
+    transform: translateX(100px);
 }
 
 .lightbox-controls .control-btn {

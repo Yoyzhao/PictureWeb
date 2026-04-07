@@ -143,6 +143,8 @@ const currentTitle = computed(() => {
   return folder ? folder.name : '未知文件夹'
 })
 
+const scrollableRef = ref<HTMLElement | null>(null)
+
 onMounted(() => {
   imageStore.fetchImages(true)
 })
@@ -180,38 +182,41 @@ const toggleSelection = (id: number) => {
 
 <template>
   <div class="content-wrapper">
-    <div class="content-header">
-        <h2 class="current-folder">{{ currentTitle }}</h2>
-        <div class="view-options">
-            <span class="item-count">共 {{ total }} 张图片</span>
-            <el-radio-group v-model="gridSize" size="small" class="grid-size-radio">
-                <el-radio-button value="small">小</el-radio-button>
-                <el-radio-button value="medium">中</el-radio-button>
-                <el-radio-button value="large">大</el-radio-button>
-            </el-radio-group>
-            <el-divider direction="vertical" />
-            <el-radio-group v-model="sortBy" size="small" class="sort-radio">
-                <el-radio-button value="modified_time">修改日期</el-radio-button>
-                <el-radio-button value="file_name">文件名</el-radio-button>
-                <el-radio-button value="file_size">大小</el-radio-button>
-            </el-radio-group>
-            <el-button 
-              size="small" 
-              class="sort-order-btn" 
-              @click="sortOrder = sortOrder === 'ASC' ? 'DESC' : 'ASC'"
-            >
-              {{ sortOrder === 'ASC' ? '升序' : '降序' }}
-            </el-button>
-        </div>
+    <div class="fixed-header-container">
+      <div class="content-header">
+          <h2 class="current-folder">{{ currentTitle }}</h2>
+          <div class="view-options">
+              <span class="item-count">共 {{ total }} 张图片</span>
+              <el-radio-group v-model="gridSize" size="small" class="grid-size-radio">
+                  <el-radio-button value="small">小</el-radio-button>
+                  <el-radio-button value="medium">中</el-radio-button>
+                  <el-radio-button value="large">大</el-radio-button>
+              </el-radio-group>
+              <el-divider direction="vertical" />
+              <el-radio-group v-model="sortBy" size="small" class="sort-radio">
+                  <el-radio-button value="modified_time">修改日期</el-radio-button>
+                  <el-radio-button value="file_name">文件名</el-radio-button>
+                  <el-radio-button value="file_size">大小</el-radio-button>
+              </el-radio-group>
+              <el-button 
+                size="small" 
+                class="sort-order-btn" 
+                @click="sortOrder = sortOrder === 'ASC' ? 'DESC' : 'ASC'"
+              >
+                {{ sortOrder === 'ASC' ? '升序' : '降序' }}
+              </el-button>
+          </div>
+      </div>
     </div>
 
-    <VirtualWaterfall 
-      :items="images" 
-      :column-width="currentColumnWidth"
-      :gap="16" 
-      :buffer="1000"
-      @load-more="imageStore.fetchImages()"
-    >
+    <div class="scrollable-content" ref="scrollableRef">
+      <VirtualWaterfall 
+        :items="images" 
+        :column-width="currentColumnWidth"
+        :gap="16" 
+        :buffer="1000"
+        @load-more="imageStore.fetchImages()"
+      >
       <template #default="{ item: img }">
         <div 
           class="img-card"
@@ -333,23 +338,40 @@ const toggleSelection = (id: number) => {
         </div>
       </div>
     </el-dialog>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .content-wrapper {
     flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-    padding-bottom: calc(var(--status-bar-height) + 24px);
+    display: flex;
+    flex-direction: column;
     position: relative;
+    overflow: hidden; /* 防止外层出现滚动条 */
+    background: var(--bg-body); /* 确保背景色统一 */
+}
+
+.fixed-header-container {
+    padding: 16px 24px 12px 24px;
+    background: var(--bg-body);
+    z-index: 10;
+    flex-shrink: 0;
+}
+
+.scrollable-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 24px 24px 24px;
+    /* 留出底部状态栏的空间 */
+    padding-bottom: calc(var(--status-bar-height) + 24px);
 }
 
 .content-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    margin-bottom: 24px;
+    margin-bottom: 0;
 }
 
 .current-folder {
