@@ -127,6 +127,30 @@ select {
 
 button {
     -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+/* 触屏与移动端通用适配 */
+@media (max-width: 768px) {
+    /* iOS 在输入框字号 < 16px 时会自动放大页面 */
+    input,
+    textarea,
+    select {
+        font-size: 16px !important;
+    }
+
+    /* Element Plus 弹窗默认固定宽度，小屏会横向溢出 */
+    .el-dialog,
+    .el-message-box {
+        width: calc(100vw - 32px) !important;
+        max-width: 420px;
+    }
+
+    .el-dialog {
+        margin-top: 8vh !important;
+        max-height: 84dvh;
+        overflow-y: auto;
+    }
 }
 
 :focus-visible {

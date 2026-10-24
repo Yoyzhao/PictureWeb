@@ -499,11 +499,17 @@ onUnmounted(() => {
     left: 0;
     width: 100vw;
     height: 100vh;
+    height: 100dvh;
     z-index: 1000;
     display: flex;
     align-items: center;
     justify-content: center;
     overscroll-behavior: contain;
+    /* 手势由组件内部处理，避免浏览器缩放/滚动抢占 */
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .lightbox-overlay {
@@ -803,9 +809,9 @@ onUnmounted(() => {
     }
 
     .lightbox-toolbar button {
-        width: 38px;
-        height: 38px;
-        font-size: 16px;
+        width: 44px;
+        height: 44px;
+        font-size: 18px;
     }
 
     .image-meta {

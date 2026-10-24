@@ -18,6 +18,8 @@
 | T-017 | 首屏指标与构建体积优化（第二轮） | 已完成 | main | aspect-ratio 消除 CLS、首屏图片优先级、Element Plus 按需引入、字体精简、滚动防抖与 buffer 调整 |
 | T-018 | 按需加载与缩略图 WebP 化（第三轮） | 已完成 | main | Admin/Trash/Lightbox 异步加载、WebP 缩略图、存量迁移开关、回收站缩略图修复 |
 | T-019 | 图片卡片悬停与选中态修复 | 已完成 | main | 移除 item paint containment、hover 抬升+阴影+微放大、选中 2px 外环 |
+| T-020 | 缩略图预生成覆盖修复与解码优化 | 已完成 | main | 以当前缓存文件判断缺失、修正旧路径记录、JPEG draft 降采样 |
+| T-021 | 触屏与移动端适配 | 已完成 | main | 无 hover 操作可达、抽屉侧边栏、16px 输入、响应式弹窗、dvh、灯箱手势 |
 
 ## 性能分析结论
 
@@ -89,6 +91,24 @@
 - `TrashPage.vue` 同步相同方案，回收站卡片 hover 与选中表现一致。
 - 验证：浏览器截图确认 hover 四周完整、无蓝边，选中 2px 环上下左右可见，控制台无 error；滚动 109.5 fps、0 长帧。
 
+### T-020 缩略图预生成覆盖修复与解码优化
+
+- 审计：`images` 21,159，DB `thumbnails` 记录 1,670 small，但当前 `data/cache/small` 仅 424 个文件；1,277 条记录指向旧缓存 `F:\_piccache`，旧预生成按 DB 记录判断缺失，导致当前缓存空缺被跳过。
+- `prebuild_thumbnails` 非 force 分支改为遍历 `images` 并按当前 `CACHE_DIR` 文件是否存在判断，生成后 upsert 修正 DB 路径。
+- `_save_thumbnail` 对 JPEG 调用 `Image.draft('RGB', size)` 降采样解码；A/B 最大图 189.6→127.4ms。
+- 修复项验证：`prebuild_thumbnails(limit=700)` 生成 496 张（70s），当前 small 缓存 424→920，DB 旧路径 1,278→772。
+- 当前覆盖率 4.4%（930/21,159），全量约需 1 小时；未在本次自动执行。
+
+### T-021 触屏与移动端适配
+
+- 触屏无 hover：`ImageGrid` / `TrashPage` 在 `@media (hover: none)` 下常显 44px 选择热区与操作按钮；回收站选中后显示还原/删除。
+- 移动端侧边栏改为 `position: fixed` 抽屉（220px），主内容不再被压缩；新增 `.sidebar-backdrop`，点击关闭。
+- 全局移动端规则：输入框 16px（避免 iOS 聚焦缩放）、Element 弹窗宽度 `calc(100vw - 32px)` 且限高 84dvh。
+- 高度改用 `100dvh`：`HomePage`、`Lightbox`、`TrashPage` 增加 `100vh` 回退。
+- 灯箱：`touch-action: none`、禁止文本选择、移动端工具栏按钮 44px，左右按钮继续隐藏（手势切换）。
+- 滚动容器（图片网格/回收站/管理页）增加 `overscroll-behavior: contain`；TopBar 移动端按钮 40px。
+- 验证：390×844 触屏模拟下选择、操作菜单、侧边栏抽屉、弹窗宽度、灯箱工具栏均通过；桌面 hover 行为未回归。
+
 ## 验证汇总
 
 | 验证项 | 方法 | 结果 |
@@ -104,6 +124,15 @@
 | 缩略图参数 | `?size=../../evil` | 回退 small，未产生越界目录 |
 | 卡片 hover/选中 | 浏览器截图 | 无顶部裁切与 1px 蓝边；2px 选中环四周完整 |
 | 滚动性能（修复后） | DevTools 滚动采样 | 109.5 fps、0 长帧 |
+| FTS5 索引 | DB 审计 | docsize 21,159；3 个触发器；`ANIME-PI` 7 命中 |
+| FTS5 接口 | 登录后 API | `ANIME-PI` 7；`PI`（LIKE）58；总列表 21,159 |
+| 缩略图预生成修复 | `prebuild_thumbnails(limit=700)` | 生成 496 张/70s；当前缓存 424→920；旧路径 1,278→772 |
+| JPEG 解码优化 | `Image.draft()` A/B | 最大图 189.6→127.4ms |
+| 触屏选择/操作 | 390×844 模拟 | 选择框 44px、操作按钮可点、选中不开灯箱 |
+| 移动端侧边栏 | 390×844 模拟 | 抽屉 220px、主内容 390px、遮罩可关闭 |
+| 移动端弹窗 | 登录弹窗 | 358px（16~374），无横向溢出 |
+| 灯箱触屏 | 计算样式 | `touch-action: none`、按钮 44px、工具栏可见 |
+| 桌面回归 | 恢复桌面视口 | checkbox/overlay 隐藏、侧边栏 relative |
 | 浏览器冒烟 | Chrome 浏览器自动化 | 首屏约 16 张卡片/总数 44；搜索、Lightbox、主题切换、滚动加载、侧边栏折叠均通过；控制台无 error |
 | 分页上限 | `GET /api/images?per_page=1000` | 返回 `per_page=200` |
 | 图片缓存 | thumbnail / raw 响应头 | `public, max-age=86400` / `public, max-age=3600` |

@@ -67,7 +67,14 @@ def _save_thumbnail(file_path, thumb_path, size_type):
         size = (300, 300)
 
     with Image.open(file_path) as img:
-        if img.mode in ('RGBA', 'P'):
+        # JPEG 可用 draft 在解码阶段降采样，避免为 300/800px 缩略图解码上亿像素大图。
+        if img.format == 'JPEG' and size_type in ('small', 'medium'):
+            try:
+                img.draft('RGB', size)
+            except Exception:
+                pass
+
+        if img.mode not in ('RGB', 'L'):
             img = img.convert('RGB')
 
         img.thumbnail(size)
@@ -208,14 +215,15 @@ def prebuild_thumbnails(folder_id=None, limit=None, size_type='small', force=Fal
                 LIMIT ?
             """
         else:
-            params = [size_type, last_id]
+            # 以当前 CACHE_DIR 的文件是否存在为准，而不是 thumbnails 表记录：
+            # 历史记录的 file_path 可能指向旧缓存目录，按记录判断会漏生成。
+            params = [last_id]
             if folder_id is not None:
                 params.append(folder_id)
             query = f"""
                 SELECT i.id AS row_id, i.id AS image_id
                 FROM images i
-                LEFT JOIN thumbnails t ON t.image_id = i.id AND t.size_type = ?
-                WHERE i.id > ? AND t.id IS NULL {folder_clause}
+                WHERE i.id > ? {folder_clause}
                 ORDER BY i.id
                 LIMIT ?
             """
@@ -226,7 +234,13 @@ def prebuild_thumbnails(folder_id=None, limit=None, size_type='small', force=Fal
             break
 
         for row in rows:
-            generate_thumbnail(row['image_id'], size_type, force=force)
+            image_id = row['image_id']
+            if not force and os.path.exists(get_thumbnail_path(image_id, size_type)):
+                processed += 1
+                last_id = row['row_id']
+                continue
+
+            generate_thumbnail(image_id, size_type, force=force)
             processed += 1
             last_id = row['row_id']
             if processed % 100 == 0:

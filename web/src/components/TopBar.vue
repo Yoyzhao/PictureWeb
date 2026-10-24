@@ -142,12 +142,19 @@ const handleSettings = () => {
         max-width: 200px;
     }
 
+    .search-input {
+        font-size: 16px;
+        height: 40px;
+    }
+
     .theme-toggle {
         margin-right: 4px;
     }
 
     .btn-icon {
-        margin-left: 8px;
+        margin-left: 4px;
+        width: 40px;
+        height: 40px;
     }
 }
 

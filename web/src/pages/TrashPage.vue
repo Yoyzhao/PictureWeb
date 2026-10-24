@@ -268,6 +268,7 @@ const imageAspectRatio = (img: any) => {
 .trash-page {
   padding: 20px;
   height: calc(100vh - var(--top-bar-height) - 40px);
+  height: calc(100dvh - var(--top-bar-height) - 40px);
   display: flex;
   flex-direction: column;
 }
@@ -310,6 +311,7 @@ const imageAspectRatio = (img: any) => {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   overflow: auto;
+  overscroll-behavior: contain;
   box-shadow: var(--shadow-sm);
 }
 
@@ -408,6 +410,35 @@ const imageAspectRatio = (img: any) => {
 .img-card.selected .card-checkbox {
   opacity: 1;
   transform: scale(1.15); /* Slightly larger on hover/selected for better visibility */
+}
+
+@media (hover: none) {
+  .card-checkbox {
+    top: 4px;
+    left: 4px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+    transform: none;
+  }
+
+  :deep(.card-checkbox .el-checkbox__inner) {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* 触屏选中后显示还原/删除操作，避免常驻遮罩 */
+  .img-card.selected .card-overlay {
+    opacity: 1;
+  }
+
+  .img-card .trash-actions .el-button {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 :deep(.card-checkbox .el-checkbox__inner) {

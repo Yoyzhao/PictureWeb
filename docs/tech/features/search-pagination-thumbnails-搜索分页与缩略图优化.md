@@ -1,7 +1,7 @@
 # 搜索分页与缩略图优化
 
 - **状态**：活跃
-- **关联 CHG/任务**：`CHG-20261024-03` / T-013 ~ T-016
+- **关联 CHG/任务**：`CHG-20261024-03`、`CHG-20261024-07` / T-013 ~ T-016、T-020
 - **所属里程碑**：M2 性能与 UI 优化（续）
 - **最后更新**：2026-10-24
 
@@ -83,10 +83,11 @@
 
 - 配置项 `THUMBNAIL_PREGENERATE`（默认 true）。
 - 扫描完成且状态置为 `completed` 后，启动一个后台线程：
-  - 查询缺失 `small` 缩略图的图片，按 id 分批（每批 100）；
-  - 逐张调用 `generate_thumbnail`；
+  - 按 id 分批（每批 100）遍历 `images`，以当前 `CACHE_DIR` 中缩略图文件是否存在判断缺失（不依赖 `thumbnails` 表的旧 `file_path`）；
+  - 逐张调用 `generate_thumbnail`，生成后 upsert 修正 `thumbnails.file_path`；
   - 每批后短暂 sleep，避免抢占请求线程与扫描线程；
   - 使用全局 `_prebuild_lock`，同一时间只允许一个预生成任务；已有任务时跳过并记录日志。
+- JPEG 缩略图先 `Image.draft()` 降采样解码，再 `thumbnail()`，降低大图解码开销。
 - 只预生成 `small`；`medium` 仍按 Lightbox 打开时按需生成。
 - 手动补齐历史库：
   ```powershell
@@ -99,6 +100,9 @@
 - 本地库缺失小缩略图约 21,859 张。
 - 执行 `--limit 5` 后 `thumbnails(size_type='small')` 从 1,993 增加到 1,998，文件写入缓存成功。
 - 后台线程未在浏览器冒烟中触发（未重新扫描）；核心函数与脚本已验证。
+- 2026-10-24 18:18 复查：`images` 21,159，当前 `data/cache/small` 仅 424 个文件；1,277 条 DB 记录指向旧缓存 `F:\_piccache`，旧逻辑会漏生成。修复后 `--limit 700` 生成 496 张（70s），当前缓存 424→920，旧路径记录 1,278→772，覆盖率 4.4%。
+- FTS5 复查：docsize 21,159、3 个同步触发器；登录后 `ANIME-PI` 命中 7、`PI`（LIKE 回退）命中 58、总列表 21,159。
+- 全量预生成未执行；按当前吞吐（约 140–190ms/张）预计约 1 小时，建议后台分批运行。
 
 ## 验证汇总
 
@@ -109,7 +113,8 @@
 | 前端构建 | `npm run build` | 通过 |
 | FTS5 搜索 | SQLite MATCH + API | 索引 23,851；`ANIME-PI` 命中 7 |
 | 游标分页 | API 连续两页 | 无重复；total 稳定；排序正确；非法游标 400 |
-| 缩略图预生成 | `prebuild_thumbnails.py --limit 5` | +5 条 small 缩略图 |
+| 缩略图预生成 | `prebuild_thumbnails.py --limit 5/700` | +5 条；修复后 496 张/70s，缓存 424→920 |
+| 预生成覆盖 | 当前 CACHE_DIR 文件审计 | 旧 DB 路径 1,277→772；覆盖率 4.4% |
 | 浏览器 | 搜索/滚动/Lightbox/侧边栏 | 全部通过；仅 ResizeObserver 警告 |
 
 ## 限制与后续

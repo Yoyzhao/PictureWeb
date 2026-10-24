@@ -84,6 +84,7 @@ const handleNext = async () => {
 <template>
   <div class="app-container" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
     <Sidebar />
+    <div v-if="!isSidebarCollapsed" class="sidebar-backdrop" @click="uiStore.toggleSidebar()"></div>
     <main class="main-content">
       <TopBar />
       <transition name="fade-slide" mode="out-in">
@@ -118,10 +119,15 @@ const handleNext = async () => {
   --current-sidebar-width: var(--sidebar-width);
   display: flex;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
   background-color: var(--bg-main);
   color: var(--text-primary);
+}
+
+.sidebar-backdrop {
+  display: none;
 }
 
 .app-container.sidebar-collapsed {
@@ -131,6 +137,14 @@ const handleNext = async () => {
 @media (max-width: 768px) {
   .app-container.sidebar-collapsed {
     --current-sidebar-width: 0px;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: rgba(0, 0, 0, 0.35);
   }
 }
 

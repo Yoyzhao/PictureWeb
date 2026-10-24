@@ -64,6 +64,9 @@
 - 管理页、回收站、灯箱必须通过 `defineAsyncComponent` 按需加载，禁止静态 import 进首页包；新增二级视图沿用该约定。
 - 字体只保留实际使用的字重（当前 MiSans Regular 400 + Semibold 600）；新增字重或字体文件前必须评估首屏传输体积。
 - 虚拟列表 `buffer` 保持 600 左右，新增滚动相关样式不得使用 `backdrop-filter` 等昂贵合成效果。
+- 关键操作不得只依赖 `:hover`：触屏（`@media (hover: none)`）下选择框与操作按钮必须可达，点击热区不小于 44×44px。
+- 移动端（≤768px）输入框字号不小于 16px（避免 iOS 聚焦缩放）；弹窗宽度必须自适应视口，页面高度使用 `100dvh` 并保留 `100vh` 回退。
+- 灯箱等手势容器使用 `touch-action: none`；可滚动区域使用 `overscroll-behavior: contain`，移动端侧边栏使用抽屉 + 遮罩，不挤压主内容。
 
 ## 5.2 后端性能约定
 
@@ -71,6 +74,8 @@
 - 列表分页后续请求必须使用 `cursor`/`next_cursor`，禁止新增深层 `OFFSET`；游标必须绑定排序并在不匹配时返回 400。
 - 新增排序字段时必须同时提供对应索引与 keyset 比较逻辑，并用 `id` 作为 tie-breaker。
 - 缩略图预生成受 `THUMBNAIL_PREGENERATE` 控制；全库补齐使用 `scripts/sql-script/prebuild_thumbnails.py` 分批执行，禁止在请求线程内全库同步生成。
+- 判断缩略图是否缺失必须以当前 `CACHE_DIR` 中文件是否存在为准，不能只信 `thumbnails` 表记录（历史 `file_path` 可能指向已废弃的缓存目录）。
+- 生成 JPEG 缩略图时先 `Image.draft()` 降采样再 `thumbnail()`，避免为 300/800px 缩略图全量解码上亿像素原图。
 - 缩略图格式由 `THUMBNAIL_FORMAT` 控制（默认 `webp`）；读取时必须兼容存量 jpg 缓存，格式迁移使用 `prebuild_thumbnails.py --rebuild` 分批执行，禁止直接删除旧缓存。
 - 回收站缩略图必须使用 `generate_thumbnail_from_path` 缓存到 `cache/trash/<size>/`，禁止把文件路径当作 image_id 传入 `generate_thumbnail`。
 - 缩略图 `size` 参数必须限制为 `small`/`medium`（服务层已做白名单），禁止直接拼接进缓存路径。

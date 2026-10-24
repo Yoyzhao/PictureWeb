@@ -300,9 +300,21 @@ const handleAddFolder = async () => {
 
 /* 移动端特殊处理 */
 @media (max-width: 768px) {
+    /* 抽屉式覆盖，不挤压主内容 */
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        height: 100dvh;
+        z-index: 110;
+        box-shadow: var(--shadow-md);
+    }
+
     .sidebar.collapsed {
         width: 0;
         border-right: none;
+        box-shadow: none;
     }
 
     .sidebar.collapsed .toggle-btn {

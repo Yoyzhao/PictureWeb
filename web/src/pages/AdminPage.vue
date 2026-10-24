@@ -793,10 +793,25 @@ const saveSettings = async () => {
   width: 100%;
   height: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-main);
   color: var(--text-primary);
   display: flex;
   flex-direction: column;
+}
+
+@media (max-width: 768px) {
+  .admin-container {
+    padding: 12px;
+  }
+
+  .admin-container .admin-tabs {
+    padding: 12px;
+  }
+
+  .admin-container .current-folder {
+    font-size: 20px;
+  }
 }
 
 .content-header {

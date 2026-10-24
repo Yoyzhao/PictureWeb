@@ -400,6 +400,8 @@ const toggleSelection = (id: number) => {
     overflow-y: auto;
     padding: 16px 24px 24px 24px;
     scrollbar-gutter: stable;
+    /* 移动端避免下拉刷新打断滚动 */
+    overscroll-behavior-y: contain;
     /* 留出底部状态栏的空间 */
     padding-bottom: calc(var(--status-bar-height) + 24px);
 }
@@ -553,6 +555,38 @@ const toggleSelection = (id: number) => {
 
     .img-card.selected:hover {
         box-shadow: 0 0 0 2px var(--primary), var(--shadow-md);
+    }
+}
+
+/* 触屏设备没有 hover：常显选择框与操作按钮，保证可选可点 */
+@media (hover: none) {
+    .card-checkbox {
+        top: 4px;
+        left: 4px;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 1;
+        transform: none;
+    }
+
+    :deep(.card-checkbox .el-checkbox__inner) {
+        width: 18px;
+        height: 18px;
+    }
+
+    .img-card .card-overlay {
+        opacity: 1;
+        background: none;
+    }
+
+    .img-card .card-overlay .action-btn {
+        width: 40px;
+        height: 40px;
+        background: rgba(15, 18, 22, 0.72);
+        backdrop-filter: none;
     }
 }
 
