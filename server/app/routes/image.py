@@ -40,6 +40,55 @@ def cursor_value(row, sort_by):
         return int(row['file_size'] or 0)
     return str(row['file_name'] or '')
 
+
+def _folder_access(db, user, folder_id, permission_type='read'):
+    """Admin and folder owner have full access; read also allows public folders."""
+    if user and user['role'] == 'admin':
+        return True
+    if not folder_id:
+        return False
+
+    folder = db.execute("SELECT user_id, is_public FROM folders WHERE id = ?", (folder_id,)).fetchone()
+    if not folder:
+        return False
+    if permission_type == 'read' and folder['is_public']:
+        return True
+    if not user:
+        return False
+    if folder['user_id'] == user['id']:
+        return True
+
+    if permission_type == 'read':
+        perm = db.execute(
+            """
+            SELECT 1 FROM permissions
+            WHERE user_id = ? AND folder_id = ?
+              AND permission_type IN ('read', 'write', 'delete', 'rename')
+            """,
+            (user['id'], folder_id)
+        ).fetchone()
+    else:
+        perm = db.execute(
+            "SELECT 1 FROM permissions WHERE user_id = ? AND folder_id = ? AND permission_type = ?",
+            (user['id'], folder_id, permission_type)
+        ).fetchone()
+    return perm is not None
+
+
+def _image_access(db, user, image_id, permission_type='read'):
+    image = db.execute("SELECT id, folder_id FROM images WHERE id = ?", (image_id,)).fetchone()
+    if not image:
+        return None, False
+    return image, _folder_access(db, user, image['folder_id'], permission_type)
+
+
+def _path_in_use(db, path):
+    """A target path is unavailable if it exists on disk or is still referenced in DB."""
+    if os.path.exists(path):
+        return True
+    db_path = path.replace('\\', '/')
+    return db.execute("SELECT 1 FROM images WHERE file_path = ?", (db_path,)).fetchone() is not None
+
 @bp.route('/<int:id>/favorite', methods=['POST'])
 @login_required
 def toggle_favorite(id):
@@ -48,7 +97,13 @@ def toggle_favorite(id):
         
     db = get_db()
     user_id = g.user['id']
-    
+
+    image, allowed = _image_access(db, g.user, id, 'read')
+    if not image:
+        return jsonify({'error': 'Image not found'}), 404
+    if not allowed:
+        return jsonify({'error': 'Permission denied'}), 403
+
     # Check if already favorited
     fav = db.execute(
         "SELECT 1 FROM user_favorites WHERE user_id = ? AND image_id = ?",
@@ -63,7 +118,7 @@ def toggle_favorite(id):
         is_favorite = False
     else:
         db.execute(
-            "INSERT INTO user_favorites (user_id, image_id) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO user_favorites (user_id, image_id) VALUES (?, ?)",
             (user_id, id)
         )
         is_favorite = True
@@ -85,54 +140,67 @@ def batch_move_images():
         return jsonify({'error': 'Missing parameters'}), 400
         
     db = get_db()
-    target_folder = db.execute("SELECT path FROM folders WHERE id = ?", (target_folder_id,)).fetchone()
+    target_folder = db.execute("SELECT id, path FROM folders WHERE id = ?", (target_folder_id,)).fetchone()
     if not target_folder:
         return jsonify({'error': 'Target folder not found'}), 404
-        
-    target_path_base = target_folder['path']
-    success_count = 0
+    if not _folder_access(db, g.user, target_folder_id, 'write'):
+        return jsonify({'error': 'Permission denied for target folder'}), 403
+
+    target_path_base = os.path.normpath(target_folder['path'])
+    if not os.path.isdir(target_path_base):
+        return jsonify({'error': 'Target folder path does not exist on disk'}), 400
+
+    success_ids = []
     errors = []
-    
+
     for img_id in image_ids:
-        image = db.execute("SELECT file_path, file_name FROM images WHERE id = ?", (img_id,)).fetchone()
+        image = db.execute("SELECT id, folder_id, file_path, file_name FROM images WHERE id = ?", (img_id,)).fetchone()
         if not image:
             errors.append(f"Image {img_id} not found")
             continue
-            
+        if not _folder_access(db, g.user, image['folder_id'], 'write'):
+            errors.append(f"Permission denied for image {img_id}")
+            continue
+
         old_path = os.path.normpath(image['file_path'])
+        if os.path.normcase(os.path.dirname(old_path)) == os.path.normcase(target_path_base):
+            errors.append(f"Image {img_id} is already in the target folder")
+            continue
+
         new_path = os.path.normpath(os.path.join(target_path_base, image['file_name']))
-        
-        # If file already exists in target, add a suffix
-        if os.path.exists(new_path):
+
+        # If file already exists (on disk or in DB), add a suffix
+        if _path_in_use(db, new_path):
             name, ext = os.path.splitext(image['file_name'])
             counter = 1
-            while os.path.exists(new_path):
+            while _path_in_use(db, new_path):
                 new_path = os.path.normpath(os.path.join(target_path_base, f"{name}_{counter}{ext}"))
                 counter += 1
-        
+
         try:
             # Physical move
             if not os.path.exists(old_path):
                 errors.append(f"File not found on disk: {old_path}")
                 continue
-                
+
             shutil.move(old_path, new_path)
             # Normalize path back for DB consistency (forward slashes)
             db_path = new_path.replace('\\', '/')
-            
+
             # Update DB
             db.execute(
-                "UPDATE images SET folder_id = ?, file_path = ?, file_name = ? WHERE id = ?", 
+                "UPDATE images SET folder_id = ?, file_path = ?, file_name = ? WHERE id = ?",
                 (target_folder_id, db_path, os.path.basename(new_path), img_id)
             )
-            success_count += 1
+            success_ids.append(img_id)
         except Exception as e:
             errors.append(f"Failed to move {image['file_name']}: {str(e)}")
-            
+
     db.commit()
     return jsonify({
-        'success': True, 
-        'moved': success_count, 
+        'success': True,
+        'moved': len(success_ids),
+        'moved_ids': success_ids,
         'errors': errors
     })
 
@@ -149,21 +217,27 @@ def batch_delete_images():
         return jsonify({'error': 'Missing image_ids'}), 400
         
     db = get_db()
-    success_count = 0
+    success_ids = []
+    missing_ids = []
+    thrashed_count = 0
     errors = []
-    
+
     trash_dir = current_app.config.get('TRASH_DIR', os.path.join(current_app.root_path, '..', 'data', 'trash'))
     if not os.path.exists(trash_dir):
         os.makedirs(trash_dir)
-        
+
     for img_id in image_ids:
         image = db.execute("SELECT * FROM images WHERE id = ?", (img_id,)).fetchone()
         if not image:
             errors.append(f"Image {img_id} not found")
             continue
-            
+        if not _folder_access(db, g.user, image['folder_id'], 'delete'):
+            errors.append(f"Permission denied for image {img_id}")
+            continue
+
         file_path = os.path.normpath(image['file_path'])
-        
+        thumbnails = db.execute("SELECT file_path FROM thumbnails WHERE image_id = ?", (img_id,)).fetchall()
+
         try:
             # Application-level trash
             if os.path.exists(file_path):
@@ -198,14 +272,12 @@ def batch_delete_images():
                     "INSERT INTO trash (image_id, original_path, trash_path, file_name, user_id, metadata) VALUES (?, ?, ?, ?, ?, ?)",
                     (img_id, file_path.replace('\\', '/'), trash_path.replace('\\', '/'), image['file_name'], g.user['id'], json.dumps(metadata))
                 )
+                thrashed_count += 1
             else:
-                errors.append(f"File not found on disk: {file_path}")
-            
-            # Delete from DB (The cascade will handle thumbnails, tags, favorites)
-            db.execute("DELETE FROM images WHERE id = ?", (img_id,))
-            
-            # Delete related thumbnails from disk
-            thumbnails = db.execute("SELECT file_path FROM thumbnails WHERE image_id = ?", (img_id,)).fetchall()
+                # Stale DB record: remove it, but do not report it as moved to trash.
+                missing_ids.append(img_id)
+
+            # Delete related thumbnails from disk (query already captured above)
             for thumb in thumbnails:
                 thumb_path = os.path.normpath(thumb['file_path'])
                 base_path = os.path.splitext(thumb_path)[0]
@@ -215,19 +287,26 @@ def batch_delete_images():
                             os.remove(candidate)
                         except Exception:
                             pass
-            # Database record deletion is handled by cascade (if configured) 
-            # or we already deleted the image which should cascade.
-            # But let's be explicit if not sure.
+
+            # Explicit cleanup: SQLite foreign_keys is not enabled in this app,
+            # so ON DELETE CASCADE will not run automatically.
+            db.execute("DELETE FROM user_favorites WHERE image_id = ?", (img_id,))
+            db.execute("DELETE FROM image_tags WHERE image_id = ?", (img_id,))
+
+            # Delete from DB (The cascade will handle thumbnails, tags, favorites)
+            db.execute("DELETE FROM images WHERE id = ?", (img_id,))
             db.execute("DELETE FROM thumbnails WHERE image_id = ?", (img_id,))
-            
-            success_count += 1
+            success_ids.append(img_id)
         except Exception as e:
             errors.append(f"Failed to delete {file_path}: {str(e)}")
-            
+
     db.commit()
     return jsonify({
-        'success': True, 
-        'deleted': success_count, 
+        'success': True,
+        'deleted': len(success_ids),
+        'deleted_ids': success_ids,
+        'trashed': thrashed_count,
+        'missing_ids': missing_ids,
         'errors': errors
     })
 
@@ -299,9 +378,9 @@ def restore_trash_images():
         return jsonify({'error': 'Missing trash_ids'}), 400
         
     db = get_db()
-    success_count = 0
+    restored_ids = []
     errors = []
-    
+
     for t_id in trash_ids:
         trash_item = db.execute("SELECT * FROM trash WHERE id = ?", (t_id,)).fetchone()
         if not trash_item:
@@ -312,7 +391,16 @@ def restore_trash_images():
         if g.user['role'] != 'admin' and trash_item['user_id'] != g.user['id']:
             errors.append(f"Permission denied for item {t_id}")
             continue
-            
+
+        metadata = json.loads(trash_item['metadata']) if trash_item['metadata'] else {}
+        folder_id = metadata.get('folder_id')
+        if folder_id and not db.execute("SELECT 1 FROM folders WHERE id = ?", (folder_id,)).fetchone():
+            errors.append(f"Original folder no longer exists for item {t_id}")
+            continue
+        if not _folder_access(db, g.user, folder_id, 'write'):
+            errors.append(f"Permission denied for original folder of item {t_id}")
+            continue
+
         trash_path = os.path.normpath(trash_item['trash_path'])
         original_path = os.path.normpath(trash_item['original_path'])
         
@@ -321,48 +409,52 @@ def restore_trash_images():
                 # Ensure directory exists
                 os.makedirs(os.path.dirname(original_path), exist_ok=True)
                 
-                # If file already exists at original location, find a new name
-                if os.path.exists(original_path):
+                # If the path is already occupied (disk or DB), find a new name
+                if _path_in_use(db, original_path):
                     name, ext = os.path.splitext(trash_item['file_name'])
                     counter = 1
-                    while os.path.exists(original_path):
+                    while _path_in_use(db, original_path):
                         original_path = os.path.normpath(os.path.join(os.path.dirname(original_path), f"{name}_{counter}{ext}"))
                         counter += 1
                 
                 shutil.move(trash_path, original_path)
-                
-                # Restore image record and metadata
-                metadata = json.loads(trash_item['metadata']) if trash_item['metadata'] else {}
-                if metadata:
-                    # Convert modified_time string back to datetime if possible
-                    mod_time = metadata.get('modified_time')
-                    if isinstance(mod_time, str):
-                        try:
-                            mod_time = datetime.fromisoformat(mod_time.replace(' ', 'T'))
-                        except:
-                            pass
-                            
-                    # Re-insert into images table
-                    cursor = db.execute(
-                        "INSERT INTO images (file_path, file_name, file_size, modified_time, width, height, format, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (original_path.replace('\\', '/'), os.path.basename(original_path), 
-                         metadata.get('file_size'), mod_time,
-                         metadata.get('width'), metadata.get('height'),
-                         metadata.get('format'), metadata.get('folder_id'))
-                    )
-                    new_image_id = cursor.lastrowid
+
+                # Convert modified_time string back to datetime if possible
+                mod_time = metadata.get('modified_time')
+                if isinstance(mod_time, str):
+                    try:
+                        mod_time = datetime.fromisoformat(mod_time.replace(' ', 'T'))
+                    except Exception:
+                        mod_time = None
+                if not mod_time:
+                    mod_time = datetime.fromtimestamp(os.path.getmtime(original_path))
+
+                file_size = metadata.get('file_size')
+                if file_size is None:
+                    file_size = os.path.getsize(original_path)
+
+                # Re-insert into images table (works even if metadata was missing)
+                cursor = db.execute(
+                    "INSERT INTO images (file_path, file_name, file_size, modified_time, width, height, format, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (original_path.replace('\\', '/'), os.path.basename(original_path),
+                     file_size, mod_time,
+                     metadata.get('width', 0) or 0, metadata.get('height', 0) or 0,
+                     metadata.get('format') or os.path.splitext(original_path)[1].lstrip('.').lower(),
+                     folder_id)
+                )
+                new_image_id = cursor.lastrowid
+
+                # Restore favorites
+                for user_id in metadata.get('favorites', []):
+                    db.execute("INSERT OR IGNORE INTO user_favorites (user_id, image_id) VALUES (?, ?)", (user_id, new_image_id))
                     
-                    # Restore favorites
-                    for user_id in metadata.get('favorites', []):
-                        db.execute("INSERT OR IGNORE INTO user_favorites (user_id, image_id) VALUES (?, ?)", (user_id, new_image_id))
-                        
-                    # Restore tags
-                    for tag_id in metadata.get('tags', []):
-                        db.execute("INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)", (new_image_id, tag_id))
-                
+                # Restore tags
+                for tag_id in metadata.get('tags', []):
+                    db.execute("INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)", (new_image_id, tag_id))
+
                 db.execute("DELETE FROM trash WHERE id = ?", (t_id,))
                 clear_trash_thumbnails(t_id)
-                success_count += 1
+                restored_ids.append(t_id)
             else:
                 errors.append(f"Trash file not found: {trash_path}")
                 db.execute("DELETE FROM trash WHERE id = ?", (t_id,)) # Clean up broken record
@@ -372,7 +464,8 @@ def restore_trash_images():
     db.commit()
     return jsonify({
         'success': True,
-        'restored': success_count,
+        'restored': len(restored_ids),
+        'restored_ids': restored_ids,
         'errors': errors
     })
 
@@ -383,8 +476,9 @@ def clear_trash_images():
     trash_ids = data.get('trash_ids', []) # If empty, clear all for user
     
     db = get_db()
-    success_count = 0
+    deleted_ids = []
     errors = []
+    success_count = 0
     
     if trash_ids:
         items_to_delete = []
@@ -407,6 +501,7 @@ def clear_trash_images():
             db.execute("DELETE FROM trash WHERE id = ?", (item['id'],))
             clear_trash_thumbnails(item['id'])
             success_count += 1
+            deleted_ids.append(item['id'])
         except Exception as e:
             errors.append(f"Failed to permanently delete {item['file_name']}: {str(e)}")
             
@@ -414,6 +509,7 @@ def clear_trash_images():
     return jsonify({
         'success': True,
         'deleted': success_count,
+        'deleted_ids': deleted_ids,
         'errors': errors
     })
 
@@ -475,23 +571,25 @@ def get_images():
     
     # Permission check: User must have access to the folder the image belongs to
     if not user or user['role'] != 'admin':
-        # Non-admins only see images in folders they have 'read' permission for OR public folders
+        # Non-admins can see their own folders, public folders and folders with read permission.
         user_id_val = user['id'] if user else -1
         conditions.append("""
             i.folder_id IN (
-                SELECT id FROM folders WHERE is_public = 1
+                SELECT id FROM folders WHERE user_id = ? OR is_public = 1
                 UNION
-                SELECT folder_id FROM permissions WHERE user_id = ? AND permission_type = 'read'
+                SELECT folder_id FROM permissions WHERE user_id = ?
+                  AND permission_type IN ('read', 'write', 'delete', 'rename')
             )
         """)
-        params.append(user_id_val)
+        params.extend([user_id_val, user_id_val])
 
     if folder_id:
         conditions.append("i.folder_id = ?")
         params.append(folder_id)
         
-    if is_favorite == 'true' and user_id:
-        conditions.append("uf.user_id IS NOT NULL")
+    if is_favorite == 'true':
+        # Anonymous users have no favorites; do not fall back to the full list.
+        conditions.append("uf.user_id IS NOT NULL" if user_id else "1 = 0")
     elif is_favorite == 'false' and user_id:
         conditions.append("uf.user_id IS NULL")
         
@@ -581,6 +679,8 @@ def get_image(id):
         
     if not image:
         return jsonify({'error': 'Image not found'}), 404
+    if not _folder_access(db, user, image['folder_id'], 'read'):
+        return jsonify({'error': 'Permission denied'}), 403
         
     img_dict = dict(image)
     # Serialize datetime
@@ -602,16 +702,18 @@ def update_image(id):
     image = db.execute("SELECT * FROM images WHERE id = ?", (id,)).fetchone()
     if not image:
         return jsonify({'error': 'Image not found'}), 404
+    if not _folder_access(db, g.user, image['folder_id'], 'rename'):
+        return jsonify({'error': 'Permission denied'}), 403
+    if 'folder_id' in data:
+        return jsonify({'error': 'Use /api/images/batch/move to change folders'}), 400
         
     fields = []
     params = []
     
-    if 'folder_id' in data:
-        fields.append("folder_id = ?")
-        params.append(data['folder_id'])
-        
     if 'file_name' in data:
-        new_name = data['file_name']
+        new_name = (data['file_name'] or '').strip()
+        if not new_name or new_name in ('.', '..') or os.path.basename(new_name) != new_name:
+            return jsonify({'error': 'Invalid file name'}), 400
         old_path = os.path.normpath(image['file_path'])
         folder_path = os.path.dirname(old_path)
         new_path = os.path.normpath(os.path.join(folder_path, new_name))

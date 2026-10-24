@@ -12,6 +12,8 @@
 - 删除图片统一进入应用内回收站（`TRASH_DIR` + `trash` 表），并在 `metadata` 中保存收藏、标签、尺寸等可恢复信息；禁止新增物理删除路径，除非有 CHG 决策。
 - 权限必须在服务端校验（`g.user['role']` 或 `permissions` 表），前端隐藏按钮只作为体验优化，不能作为权限依据。
 - 时间字段新增时先确认口径；当前 `created_at/updated_at/deleted_at` 为 SQLite UTC、`modified_time` 为本地时间，不得在未统一前混用于同一排序或统计。
+- 写操作必须在服务端校验文件夹权限：收藏=读取（任一权限均包含读取）、移动=源+目标 `write`、删除=`delete`、重命名=`rename`；管理员与文件夹所有者拥有全部权限。
+- SQLite 未开启 `foreign_keys`，删除图片/文件夹/用户时必须显式清理 `user_favorites`、`image_tags`、`thumbnails`、`permissions`；不得依赖 `ON DELETE CASCADE` 自动生效。
 
 ## 2. 命名约定
 

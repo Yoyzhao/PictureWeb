@@ -69,8 +69,9 @@ def delete_folder(id):
                     except:
                         pass
         
-        # 2. Delete from DB (Cascade will handle images and thumbnails records if configured, 
-        # but let's be explicit if not sure about foreign key constraints in current DB)
+        # 2. Delete from DB (foreign_keys is not enabled, so clean up dependents explicitly)
+        db.execute("DELETE FROM user_favorites WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
+        db.execute("DELETE FROM image_tags WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
         db.execute("DELETE FROM thumbnails WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
         db.execute("DELETE FROM images WHERE folder_id = ?", (id,))
         db.execute("DELETE FROM folders WHERE id = ?", (id,))
@@ -91,14 +92,14 @@ def get_folders():
         # Admin can see all folders
         folders = db.execute("SELECT id, path, name, user_id, is_public, scan_status, scan_total, scan_processed, scan_error, created_at, updated_at FROM folders").fetchall()
     elif user:
-        # Regular users can see public folders OR folders they have 'read' permission for
+        # Regular users can see their own folders, public folders, or folders with read permission
         query = """
             SELECT DISTINCT f.id, f.path, f.name, f.user_id, f.is_public, f.scan_status, f.scan_total, f.scan_processed, f.scan_error, f.created_at, f.updated_at 
             FROM folders f
             LEFT JOIN permissions p ON f.id = p.folder_id
-            WHERE f.is_public = 1 OR (p.user_id = ? AND p.permission_type = 'read')
+            WHERE f.user_id = ? OR f.is_public = 1 OR (p.user_id = ? AND p.permission_type IN ('read', 'write', 'delete', 'rename'))
         """
-        folders = db.execute(query, (user['id'],)).fetchall()
+        folders = db.execute(query, (user['id'], user['id'])).fetchall()
     else:
         # Anonymous users can only see public folders
         folders = db.execute("SELECT id, path, name, user_id, is_public, scan_status, scan_total, scan_processed, scan_error, created_at, updated_at FROM folders WHERE is_public = 1").fetchall()

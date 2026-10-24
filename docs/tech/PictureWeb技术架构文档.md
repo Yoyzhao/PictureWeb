@@ -92,10 +92,10 @@ graph TD
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/api/folders` | 可选登录 | 管理员返回全部；登录用户返回公开文件夹 + 有 `read` 权限的文件夹；匿名仅返回公开文件夹 |
+| GET | `/api/folders` | 可选登录 | 管理员返回全部；登录用户返回自己的文件夹、公开文件夹以及拥有任一权限的文件夹；匿名仅返回公开文件夹 |
 | POST | `/api/folders` | 登录（非 guest） | 添加文件夹并触发后台异步扫描；参数 `path`、可选 `name`、`is_public` |
 | PATCH | `/api/folders/<id>` | 管理员 | 更新 `name`、`path`、`is_public` |
-| DELETE | `/api/folders/<id>?hard=false` | 管理员 | 删除文件夹索引；`hard=true` 时先把物理目录移动到应用回收站 |
+| DELETE | `/api/folders/<id>?hard=false` | 管理员 | 删除文件夹索引；`hard=true` 时先把物理目录移动到应用回收站；同时显式清理收藏、标签、缩略图与权限记录 |
 | POST | `/api/folders/<id>/scan` | 登录（非 guest） | 手动触发重新扫描，扫描中返回 409 |
 
 文件夹对象包含 `scan_status`（none/pending/scanning/completed/failed）、`scan_total`、`scan_processed`、`scan_error`。
@@ -104,15 +104,15 @@ graph TD
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/api/images` | 可选登录 | 分页列表；支持 `folder_id`、`is_favorite`、`q`、`sort_by`（modified_time/file_name/file_size）、`sort_order`、`cursor`；响应返回 `next_cursor` |
-| GET | `/api/images/<id>` | 可选登录 | 图片详情，附带当前用户收藏状态 `is_favorite` |
-| PATCH | `/api/images/<id>` | 登录（非 guest） | 重命名（`file_name`）或调整所属文件夹（`folder_id`） |
-| POST | `/api/images/<id>/favorite` | 登录（非 guest） | 切换当前用户收藏状态 |
+| GET | `/api/images` | 可选登录 | 分页列表；非管理员仅返回自己的文件夹、公开文件夹或拥有任一权限的文件夹中的图片；`is_favorite=true` 对匿名用户返回空集；支持 `folder_id`、`is_favorite`、`q`、`sort_by`、`sort_order`、`cursor` |
+| GET | `/api/images/<id>` | 可选登录 | 图片详情，附带当前用户收藏状态；需要该文件夹的读取权限（公开文件夹允许匿名） |
+| PATCH | `/api/images/<id>` | 登录（非 guest）+ `rename` 权限 | 重命名（仅 `file_name`，禁止通过该接口改 `folder_id`）；文件名必须是纯文件名 |
+| POST | `/api/images/<id>/favorite` | 登录（非 guest）+ 读取权限 | 切换当前用户收藏状态 |
 | GET | `/api/images/<id>/thumbnail?size=small\|medium` | 公开 | 读取缩略图（按需生成并缓存） |
 | GET | `/api/images/<id>/raw` | 公开 | 读取原图 |
 | GET | `/api/images/<id>/download` | 公开 | 以附件形式下载原图 |
-| POST | `/api/images/batch/move` | 登录（非 guest） | 批量移动；参数 `image_ids`、`target_folder_id` |
-| POST | `/api/images/batch/delete` | 登录（非 guest） | 批量移动到应用内回收站并记录元数据 |
+| POST | `/api/images/batch/move` | 登录（非 guest）+ 源/目标 `write` 权限 | 批量移动；目标目录必须存在；同名自动加后缀；返回 `moved_ids` 与逐项 `errors` |
+| POST | `/api/images/batch/delete` | 登录（非 guest）+ `delete` 权限 | 批量移动到回收站并记录元数据；返回 `deleted_ids`、`trashed`、`missing_ids`、`errors`；文件缺失时只删除索引 |
 
 > 已知安全缺口：`raw`、`thumbnail`、`download` 当前未校验登录与文件夹权限，对外暴露前需补齐。
 >
@@ -124,8 +124,8 @@ graph TD
 |------|------|------|------|
 | GET | `/api/images/trash/items` | 登录 | 管理员查看全部；普通用户仅查看自己的回收站记录 |
 | GET | `/api/images/trash/<id>/thumbnail` | 登录（所有者/管理员） | 读取回收站文件缩略图 |
-| POST | `/api/images/trash/restore` | 登录（所有者/管理员） | 批量恢复；参数 `trash_ids` |
-| POST | `/api/images/trash/clear` | 登录（所有者/管理员） | 彻底删除指定记录；`trash_ids` 为空时清空当前用户回收站 |
+| POST | `/api/images/trash/restore` | 登录（所有者/管理员）+ 原文件夹 `write` 权限 | 批量恢复；原文件夹不存在或无权限时保留在回收站并返回错误；恢复后重新插入图片、收藏与标签，返回 `restored_ids` |
+| POST | `/api/images/trash/clear` | 登录（所有者/管理员） | 彻底删除指定记录；`trash_ids` 为空时清空当前用户回收站；返回 `deleted_ids` |
 
 ### 4.5 管理接口（`/api/admin`）
 

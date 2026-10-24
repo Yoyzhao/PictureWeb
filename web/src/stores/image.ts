@@ -197,19 +197,28 @@ export const useImageStore = defineStore('image', () => {
     try {
       const idsToMove = [...selectedImageIds.value]
       const res = await batchMoveImages(idsToMove, targetFolderId)
-      if (res.data.success) {
-        ElMessage.success(`成功移动 ${res.data.moved} 张图片`)
-        clearSelection()
-        
-        // Remove locally from current view
-        images.value = images.value.filter(img => !idsToMove.includes(img.id))
-        idsToMove.forEach(id => loadedIds.delete(id))
-        total.value = Math.max(0, total.value - res.data.moved)
-        
-        // If we're now low on images, fetch more without reset
-        if (images.value.length < 20 && total.value > images.value.length) {
-          fetchImages()
-        }
+      const body = res.data
+      const movedIds: number[] = body.moved_ids || []
+      const errors: string[] = body.errors || []
+
+      if (movedIds.length > 0) {
+        ElMessage.success(`成功移动 ${body.moved} 张图片`)
+      }
+      if (errors.length > 0) {
+        ElMessage.warning(`移动失败 ${errors.length} 张：${errors[0]}`)
+      }
+      clearSelection()
+
+      // Only remove from the current list when viewing a concrete folder that is not the target.
+      if (currentFolderId.value !== undefined && currentFolderId.value !== targetFolderId) {
+        images.value = images.value.filter(img => !movedIds.includes(img.id))
+        movedIds.forEach(id => loadedIds.delete(id))
+        total.value = Math.max(0, total.value - movedIds.length)
+      }
+
+      // If we're now low on images, fetch more without reset
+      if (images.value.length < 20 && total.value > images.value.length) {
+        fetchImages()
       }
     } catch (error: any) {
       ElMessage.error('批量移动失败: ' + (error.response?.data?.error || error.message))
@@ -221,19 +230,29 @@ export const useImageStore = defineStore('image', () => {
     try {
       const idsToDelete = [...selectedImageIds.value]
       const res = await batchDeleteImages(idsToDelete)
-      if (res.data.success) {
-        ElMessage.success(`成功将 ${res.data.deleted} 张图片移至回收站`)
-        clearSelection()
-        
-        // Remove locally instead of full refresh with reset
-        images.value = images.value.filter(img => !idsToDelete.includes(img.id))
-        idsToDelete.forEach(id => loadedIds.delete(id))
-        total.value = Math.max(0, total.value - res.data.deleted)
-        
-        // If we're now low on images, fetch more without reset
-        if (images.value.length < 20 && total.value > images.value.length) {
-          fetchImages()
-        }
+      const body = res.data
+      const deletedIds: number[] = body.deleted_ids || idsToDelete
+      const errors: string[] = body.errors || []
+      const missingCount = (body.missing_ids || []).length
+
+      if (missingCount > 0) {
+        ElMessage.warning(`已删除 ${deletedIds.length} 张，其中 ${missingCount} 张文件缺失，未进入回收站`)
+      } else if (deletedIds.length > 0) {
+        ElMessage.success(`成功将 ${deletedIds.length} 张图片移至回收站`)
+      }
+      if (errors.length > 0) {
+        ElMessage.warning(`删除失败 ${errors.length} 张：${errors[0]}`)
+      }
+      clearSelection()
+
+      // Remove only records that were actually deleted.
+      images.value = images.value.filter(img => !deletedIds.includes(img.id))
+      deletedIds.forEach(id => loadedIds.delete(id))
+      total.value = Math.max(0, total.value - deletedIds.length)
+
+      // If we're now low on images, fetch more without reset
+      if (images.value.length < 20 && total.value > images.value.length) {
+        fetchImages()
       }
     } catch (error: any) {
       ElMessage.error('批量删除失败: ' + (error.response?.data?.error || error.message))
@@ -264,11 +283,20 @@ export const useImageStore = defineStore('image', () => {
   const restoreFromTrash = async (trashIds: number[]) => {
     try {
       const res = await restoreTrash(trashIds)
-      if (res.data.success) {
-        ElMessage.success(`成功恢复 ${res.data.restored} 张图片`)
-        trashItems.value = trashItems.value.filter(item => !trashIds.includes(item.id))
-        return true
+      const body = res.data
+      const restoredIds: number[] = body.restored_ids || trashIds
+      const errors: string[] = body.errors || []
+
+      if (restoredIds.length > 0) {
+        ElMessage.success(`成功恢复 ${restoredIds.length} 张图片`)
+        trashItems.value = trashItems.value.filter(item => !restoredIds.includes(item.id))
+        // Restored rows are re-inserted into images, so refresh the gallery instead of asking for a rescan.
+        fetchImages(true)
       }
+      if (errors.length > 0) {
+        ElMessage.warning(`恢复失败 ${errors.length} 张：${errors[0]}`)
+      }
+      return restoredIds.length > 0
     } catch (error: any) {
       ElMessage.error('恢复失败: ' + (error.response?.data?.error || error.message))
     }
@@ -278,16 +306,18 @@ export const useImageStore = defineStore('image', () => {
   const permanentlyDelete = async (trashIds?: number[]) => {
     try {
       const res = await clearTrash(trashIds)
-      if (res.data.success) {
-        if (trashIds) {
-          ElMessage.success(`成功彻底删除 ${res.data.deleted} 张图片`)
-          trashItems.value = trashItems.value.filter(item => !trashIds.includes(item.id))
-        } else {
-          ElMessage.success('已清空回收站')
-          trashItems.value = []
-        }
-        return true
+      const body = res.data
+      const deletedIds: number[] = body.deleted_ids || []
+      const errors: string[] = body.errors || []
+
+      trashItems.value = trashItems.value.filter(item => !deletedIds.includes(item.id))
+      if (body.deleted > 0) {
+        ElMessage.success(trashIds ? `成功彻底删除 ${body.deleted} 张图片` : '回收站已清空')
       }
+      if (errors.length > 0) {
+        ElMessage.warning(`删除失败 ${errors.length} 项：${errors[0]}`)
+      }
+      return body.deleted > 0
     } catch (error: any) {
       ElMessage.error('删除失败: ' + (error.response?.data?.error || error.message))
     }

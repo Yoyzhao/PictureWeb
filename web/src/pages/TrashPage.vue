@@ -51,9 +51,8 @@ const handleRestore = async (id?: number) => {
   const success = await imageStore.restoreFromTrash(ids)
   if (success) {
     selectedTrashIds.value = []
-    // Restore logic in backend doesn't automatically re-index, 
-    // but the file is back. User might need to scan.
-    ElMessage.info('图片已恢复至原始路径，请重新扫描文件夹以在相册中显示。')
+    // Backend re-inserts the image row and refreshes the gallery automatically.
+    ElMessage.info('图片已恢复到原文件夹。')
   }
 }
 

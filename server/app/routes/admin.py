@@ -164,6 +164,9 @@ def delete_user(id):
         if admin_count <= 1:
             return jsonify({'error': 'Cannot delete the last admin user'}), 400
 
+    # foreign_keys is not enabled, so clean up user-owned rows explicitly.
+    db.execute("DELETE FROM user_favorites WHERE user_id = ?", (id,))
+    db.execute("DELETE FROM permissions WHERE user_id = ?", (id,))
     db.execute("DELETE FROM users WHERE id = ?", (id,))
     db.commit()
     return jsonify({'success': True})
@@ -199,10 +202,14 @@ def delete_folder(id):
         if not folder:
             return jsonify({'error': 'Folder not found'}), 404
             
-        # Delete images first (this will cascade delete thumbnails/tags in DB)
+        # Delete images first. foreign_keys is not enabled, so remove dependents explicitly.
+        db.execute("DELETE FROM user_favorites WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
+        db.execute("DELETE FROM image_tags WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
+        db.execute("DELETE FROM thumbnails WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
         db.execute("DELETE FROM images WHERE folder_id = ?", (id,))
         
-        # Delete the folder record (this will cascade delete permissions in DB)
+        # Delete the folder record and its permissions explicitly.
+        db.execute("DELETE FROM permissions WHERE folder_id = ?", (id,))
         db.execute("DELETE FROM folders WHERE id = ?", (id,))
         
         db.commit()

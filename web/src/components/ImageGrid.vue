@@ -53,9 +53,20 @@ const handleSingleDelete = (img: any) => {
   ).then(async () => {
     try {
       const res = await imageStore.batchDeleteImages([img.id])
-      if (res.data.success) {
-        ElMessage.success('已移至回收站')
+      const body = res.data
+      const deletedIds: number[] = body.deleted_ids || []
+      const missingIds: number[] = body.missing_ids || []
+      const errors: string[] = body.errors || []
+
+      if (deletedIds.includes(img.id)) {
+        if (missingIds.includes(img.id)) {
+          ElMessage.warning('文件已缺失，仅移除了索引记录')
+        } else {
+          ElMessage.success('已移至回收站')
+        }
         imageStore.fetchImages(true)
+      } else if (errors.length > 0) {
+        ElMessage.error(errors[0])
       }
     } catch (err) {
       ElMessage.error('删除失败')
@@ -74,9 +85,14 @@ const handleBatchMove = async () => {
       await imageStore.batchMove(targetFolderId.value)
     } else if (singleMoveImageId.value) {
       const res = await imageStore.batchMoveImages([singleMoveImageId.value], targetFolderId.value)
-      if (res.data.success) {
+      const body = res.data
+      const movedIds: number[] = body.moved_ids || []
+      const errors: string[] = body.errors || []
+      if (movedIds.includes(singleMoveImageId.value)) {
         ElMessage.success('移动成功')
         imageStore.fetchImages(true)
+      } else if (errors.length > 0) {
+        ElMessage.error('移动失败: ' + errors[0])
       }
     }
     showMoveDialog.value = false
