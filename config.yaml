@@ -17,4 +17,5 @@ SCAN_EXTENSIONS: .jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff
 SCAN_RECURSIVE: true
 SERVER_PORT: 5001
 THUMBNAIL_QUALITY: 90
+THUMBNAIL_PREGENERATE: true
 TRASH_DIR: data/trash

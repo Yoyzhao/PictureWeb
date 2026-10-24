@@ -41,6 +41,7 @@ export const getImages = (params: {
   sort_by?: string;
   sort_order?: string;
   q?: string;
+  cursor?: string;
 }, signal?: AbortSignal) =>
   api.get('/images', { params, signal })
 

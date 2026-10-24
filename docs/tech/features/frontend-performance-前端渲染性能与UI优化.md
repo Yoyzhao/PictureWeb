@@ -92,17 +92,18 @@
 - `GET /api/images` 的 `page` 最小为 1，`per_page` 限制在 1–200。
 - 缩略图返回 `Cache-Control: public, max-age=86400`，原图/下载 `max-age=3600`，并启用条件请求。
 - 新增公开接口 `GET /api/settings`，只返回 `HOTKEYS` 与 `ENABLE_PRELOAD`；修复匿名用户访问 `/api/admin/settings` 产生 401 控制台错误。
+- FTS5 搜索、keyset 游标分页与缩略图后台预生成见 `search-pagination-thumbnails-搜索分页与缩略图优化.md`。
 
 ## 10 万张规模的后续优化空间
 
-当前优化解决了“滚动 O(n)、追加 O(n²)、搜索请求风暴”这三类会随数据量放大的问题；但无限滚动仍会把已浏览页累积在内存中，10 万张全部滚完时内存与布局对象仍会增长。建议下一阶段按优先级推进：
+当前优化解决了“滚动 O(n)、追加 O(n²)、搜索请求风暴”这三类会随数据量放大的问题；已追加 FTS5 与 keyset 分页，缩略图支持后台预生成。但无限滚动仍会把已浏览页累积在内存中，10 万张全部滚完时内存与布局对象仍会增长。建议下一阶段按优先级推进：
 
-1. **窗口化数据源 / 游标分页**：只保留视口附近若干页，或改用 `(modified_time, id)` keyset 分页；避免 `OFFSET` 深分页与全量累积。
-2. **SQLite FTS5（trigram）**：为 `images.file_name` 建全文索引，替换 `LIKE '%q%'` 全表扫描；保留无 FTS 时的 LIKE 回退。
-3. **缩略图预生成队列**：扫描完成后由后台限流队列生成 `small`、`medium`，或改用 WebP/AVIF；当前仍为按需同步生成。
-4. **响应式图片**：按列宽返回 300/600/1200 多档缩略图或 `srcset`，减少大图网格带宽。
-5. **前端代码拆分**：Element Plus 与 Lightbox 可按路由/交互动态导入，降低首屏 JS（当前构建仍有 >500KB chunk 警告）。
-6. **SQLite 维护**：定期 `ANALYZE` / `VACUUM`，并为高频筛选组合补充复合索引。
+1. **窗口化数据源**：keyset 分页已实现（见 `search-pagination-thumbnails-搜索分页与缩略图优化.md`），但前端仍累积已加载页；真正的窗口化需要元数据级虚拟化或只保留视口附近页面。
+2. **响应式图片**：按列宽返回 300/600/1200 多档缩略图或 `srcset`，减少大图网格带宽。
+3. **前端代码拆分**：Element Plus 与 Lightbox 可按路由/交互动态导入，降低首屏 JS（当前构建仍有 >500KB chunk 警告）。
+4. **SQLite 维护**：定期 `ANALYZE` / `VACUUM`，并为高频筛选组合补充复合索引。
+5. **缩略图格式**：在 small/medium 之外评估 WebP/AVIF 与失败占位缓存。
+6. **真实数据压测**：在 10 万张库上验证搜索、深度滚动、首屏与缩略图预生成耗时。
 7. **图片读取鉴权**：`raw`/`thumbnail`/`download` 仍为公开接口，性能优化不改变该安全缺口。
 
 ## 验证

@@ -1,4 +1,6 @@
 import os
+import threading
+import time
 from PIL import Image
 from flask import current_app
 from app.utils.db import get_db
@@ -80,3 +82,72 @@ def generate_thumbnail(image_id, size_type='small'):
     except Exception as e:
         print(f"Error generating thumbnail for {file_path}: {e}")
         return None
+
+
+_prebuild_lock = threading.Lock()
+
+
+def prebuild_thumbnails(folder_id=None, limit=None, size_type='small'):
+    """
+    Generate missing thumbnails sequentially, ordered by image id.
+    Must be called inside a Flask app context. Returns the number of attempted images.
+    """
+    db = get_db()
+    last_id = 0
+    processed = 0
+
+    while True:
+        if limit is not None and processed >= limit:
+            break
+
+        batch_size = 100 if limit is None else min(100, limit - processed)
+        params = [size_type, last_id]
+        folder_clause = ''
+        if folder_id is not None:
+            folder_clause = ' AND i.folder_id = ?'
+            params.append(folder_id)
+
+        rows = db.execute(f"""
+            SELECT i.id
+            FROM images i
+            LEFT JOIN thumbnails t ON t.image_id = i.id AND t.size_type = ?
+            WHERE i.id > ? AND t.id IS NULL {folder_clause}
+            ORDER BY i.id
+            LIMIT ?
+        """, params + [batch_size]).fetchall()
+
+        if not rows:
+            break
+
+        for row in rows:
+            generate_thumbnail(row['id'], size_type)
+            processed += 1
+            last_id = row['id']
+            if processed % 100 == 0:
+                print(f"Thumbnail prebuild progress: {processed}")
+
+        # Yield briefly so request threads and scans are not starved.
+        time.sleep(0.01)
+
+    return processed
+
+
+def start_folder_thumbnail_prebuild(app, folder_id):
+    """Start one background prebuild worker; skip if another prebuild is running."""
+    if not _prebuild_lock.acquire(blocking=False):
+        print(f"Thumbnail prebuild already running; skipped folder {folder_id}")
+        return False
+
+    def runner():
+        try:
+            with app.app_context():
+                processed = prebuild_thumbnails(folder_id=folder_id, size_type='small')
+                print(f"Thumbnail prebuild finished for folder {folder_id}: {processed} images")
+        except Exception as e:
+            print(f"Thumbnail prebuild failed for folder {folder_id}: {e}")
+        finally:
+            _prebuild_lock.release()
+
+    thread = threading.Thread(target=runner, daemon=True, name=f'thumb-prebuild-{folder_id}')
+    thread.start()
+    return True

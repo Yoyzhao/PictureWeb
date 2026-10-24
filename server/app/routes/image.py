@@ -3,6 +3,7 @@ from app.utils.db import get_db
 from app.services.thumbnail import generate_thumbnail
 from app.routes.auth import get_current_user, login_required
 from datetime import datetime
+import base64
 import os
 import shutil
 import uuid
@@ -10,6 +11,34 @@ import json
 # from send2trash import send2trash
 
 bp = Blueprint('image', __name__, url_prefix='/api/images')
+
+
+def encode_cursor(payload):
+    raw = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    return base64.urlsafe_b64encode(raw).decode('ascii').rstrip('=')
+
+
+def decode_cursor(token):
+    if not token:
+        return None
+    try:
+        padded = token + '=' * (-len(token) % 4)
+        raw = base64.urlsafe_b64decode(padded.encode('ascii'))
+        payload = json.loads(raw.decode('utf-8'))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def cursor_value(row, sort_by):
+    if sort_by == 'modified_time':
+        value = row['modified_time']
+        if value is None:
+            return ''
+        return value.strftime('%Y-%m-%d %H:%M:%S.%f') if hasattr(value, 'strftime') else str(value)
+    if sort_by == 'file_size':
+        return int(row['file_size'] or 0)
+    return str(row['file_name'] or '')
 
 @bp.route('/<int:id>/favorite', methods=['POST'])
 @login_required
@@ -393,12 +422,17 @@ def get_images():
     per_page = request.args.get('per_page', 50, type=int)
     per_page = min(max(per_page, 1), 200)
     offset = (page - 1) * per_page
+
+    cursor_token = request.args.get('cursor', type=str)
+    cursor = decode_cursor(cursor_token)
+    if cursor_token and cursor is None:
+        return jsonify({'error': 'Invalid cursor'}), 400
     
     # Filtering
     folder_id = request.args.get('folder_id', type=int)
     is_favorite = request.args.get('is_favorite', type=str)
     sort_by = request.args.get('sort_by', 'modified_time')
-    sort_order = request.args.get('sort_order', 'DESC')
+    sort_order = request.args.get('sort_order', 'DESC').upper()
     q = request.args.get('q', type=str)
     
     # Validate sort_by to prevent SQL injection
@@ -407,8 +441,16 @@ def get_images():
         sort_by = 'modified_time'
     
     # Validate sort_order
-    if sort_order.upper() not in ['ASC', 'DESC']:
+    if sort_order not in ['ASC', 'DESC']:
         sort_order = 'DESC'
+
+    if cursor:
+        if cursor.get('s') != sort_by or cursor.get('o') != sort_order:
+            return jsonify({'error': 'Cursor does not match current sort'}), 400
+        last_id = cursor.get('id')
+        last_value = cursor.get('v')
+        if not isinstance(last_id, int) or last_value is None:
+            return jsonify({'error': 'Invalid cursor'}), 400
     
     # Base query with LEFT JOIN to get favorite status for the current user
     if user_id:
@@ -419,10 +461,6 @@ def get_images():
             LEFT JOIN user_favorites uf ON i.id = uf.image_id AND uf.user_id = ?
         """
         params = [user_id]
-        
-        # We need to add user_id AGAIN for any subsequent parameter bindings if they exist?
-        # Actually, let's restructure this to be safer.
-        # The first parameter is for the LEFT JOIN condition.
     else:
         query = "SELECT i.*, 0 as is_fav FROM images i"
         params = []
@@ -452,32 +490,50 @@ def get_images():
         conditions.append("uf.user_id IS NULL")
         
     if q:
-        conditions.append("i.file_name LIKE ?")
-        search_term = f"%{q}%"
-        params.append(search_term)
+        term = q.strip()
+        # FTS5 trigram supports substring search for 3+ characters; shorter terms fall back to LIKE.
+        if term and current_app.config.get('FTS5_ENABLED') and len(term) >= 3:
+            conditions.append("i.id IN (SELECT rowid FROM images_fts WHERE images_fts MATCH ?)")
+            params.append('"' + term.replace('"', '""') + '"')
+        else:
+            conditions.append("i.file_name LIKE ?")
+            params.append(f"%{q}%")
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
         
-    # Count total - use the query WITH conditions but WITHOUT limits
-    # CRITICAL FIX: The count query needs the JOIN to filter by favorites correctly if requested
-    # AND it needs the same parameters.
-    # But `params` already contains [user_id, folder_id, ...].
-    # When we wrap it in `SELECT COUNT(*) FROM (...)`, the inner query needs its params.
+    # Count the full filtered set BEFORE applying the keyset boundary.
     count_sql = f"SELECT COUNT(*) FROM ({query})"
-    
-    # We execute count_sql with the current params list
     total = db.execute(count_sql, params).fetchone()[0]
-    
-    # Sorting
-    query += f" ORDER BY i.{sort_by} {sort_order}"
-    
-    # Pagination
-    query += " LIMIT ? OFFSET ?"
-    # We need a NEW params list for the final query that includes limit/offset
-    final_params = params + [per_page, offset]
-    
+
+    # Keyset pagination avoids deep OFFSET scans at 100k scale.
+    query_params = list(params)
+    if cursor:
+        operator = '<' if sort_order == 'DESC' else '>'
+        keyset = f"(i.{sort_by} {operator} ? OR (i.{sort_by} = ? AND i.id {operator} ?))"
+        query += (" AND " if conditions else " WHERE ") + keyset
+        query_params.extend([last_value, last_value, last_id])
+
+    query += f" ORDER BY i.{sort_by} {sort_order}, i.id {sort_order}"
+
+    if cursor:
+        query += " LIMIT ?"
+        final_params = query_params + [per_page]
+    else:
+        query += " LIMIT ? OFFSET ?"
+        final_params = query_params + [per_page, offset]
+
     images = db.execute(query, final_params).fetchall()
+
+    next_cursor = None
+    if images and len(images) == per_page:
+        last = images[-1]
+        next_cursor = encode_cursor({
+            's': sort_by,
+            'o': sort_order,
+            'v': cursor_value(last, sort_by),
+            'id': last['id']
+        })
     
     # Process images to map is_fav to is_favorite
     result_data = []
@@ -495,7 +551,8 @@ def get_images():
         'data': result_data,
         'total': total,
         'page': page,
-        'per_page': per_page
+        'per_page': per_page,
+        'next_cursor': next_cursor
     })
 
 @bp.route('/<int:id>', methods=['GET'])

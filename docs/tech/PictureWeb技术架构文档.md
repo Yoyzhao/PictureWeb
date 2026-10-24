@@ -104,7 +104,7 @@ graph TD
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/api/images` | 可选登录 | 分页列表；支持 `folder_id`、`is_favorite`、`q`、`sort_by`（modified_time/file_name/file_size）、`sort_order` |
+| GET | `/api/images` | 可选登录 | 分页列表；支持 `folder_id`、`is_favorite`、`q`、`sort_by`（modified_time/file_name/file_size）、`sort_order`、`cursor`；响应返回 `next_cursor` |
 | GET | `/api/images/<id>` | 可选登录 | 图片详情，附带当前用户收藏状态 `is_favorite` |
 | PATCH | `/api/images/<id>` | 登录（非 guest） | 重命名（`file_name`）或调整所属文件夹（`folder_id`） |
 | POST | `/api/images/<id>/favorite` | 登录（非 guest） | 切换当前用户收藏状态 |
@@ -115,6 +115,8 @@ graph TD
 | POST | `/api/images/batch/delete` | 登录（非 guest） | 批量移动到应用内回收站并记录元数据 |
 
 > 已知安全缺口：`raw`、`thumbnail`、`download` 当前未校验登录与文件夹权限，对外暴露前需补齐。
+>
+> 分页：首次请求不传 `cursor`，响应返回 `next_cursor`；后续将 `next_cursor` 作为 `cursor` 传入。游标为 base64(JSON)，绑定 `sort_by`/`sort_order`，与当前排序不一致返回 400。`total` 为完整筛选总数，不受游标边界影响。
 
 ### 4.4 回收站（`/api/images/trash`）
 
@@ -274,7 +276,7 @@ erDiagram
 
 ### 6.2 数据定义语言
 
-> 以下结构与 `server/app/models/schema.sql` 保持一致；实际建表语句使用 `CREATE TABLE IF NOT EXISTS`，并包含对应索引。
+> 以下结构与 `server/app/models/schema.sql` 保持一致；实际建表语句使用 `CREATE TABLE IF NOT EXISTS`，并包含对应索引。另由 `db.ensure_fts()` 创建 `images_fts` FTS5 trigram 虚拟表及增删改同步触发器，用于文件名搜索。
 
 #### 用户表 (users)
 ```sql
@@ -504,9 +506,9 @@ PicGallery/
 │   ├── app/
 │   │   ├── __init__.py          # create_app、.env/config 加载、蓝图注册、web/dist 静态托管
 │   │   ├── models/schema.sql    # 建表语句
-│   │   ├── routes/              # auth.py / folder.py / image.py / admin.py
-│   │   ├── services/            # scanner.py（扫描）/ thumbnail.py（缩略图）
-│   │   └── utils/db.py          # 连接、建表、轻量迁移、管理员/访客初始化
+│   │   ├── routes/              # auth.py / folder.py / image.py / admin.py / settings.py
+│   │   ├── services/            # scanner.py（扫描）/ thumbnail.py（缩略图与预生成）
+│   │   └── utils/db.py          # 连接、建表、轻量迁移、FTS5 索引、管理员/访客初始化
 │   ├── venv/                    # Python 3.12.7 虚拟环境（git 忽略）
 │   ├── requirements.txt         # Python 依赖
 │   └── run.py                   # 开发入口（Flask dev server）
@@ -530,7 +532,7 @@ PicGallery/
 ├── docs/                        # prd/tech/plan/deploy/rules/prototype
 ├── scripts/
 │   ├── deploy-script/           # Windows 部署脚本
-│   └── sql-script/              # init_db.py / normalize_db.py
+│   └── sql-script/              # init_db.py / normalize_db.py / prebuild_thumbnails.py
 ├── data/                        # 本地运行数据（git 忽略）
 │   ├── db/database.db           # 开发/测试数据库
 │   ├── cache/                   # 缩略图缓存
@@ -551,7 +553,9 @@ PicGallery/
 - SQLite 连接启用 `journal_mode=WAL`、`synchronous=NORMAL`、`cache_size=-20000`、`temp_store=MEMORY`，降低浏览读取与扫描写入的相互阻塞。
 - `GET /api/images` 的 `page` 最小为 1、`per_page` 限制在 1–200，避免异常大分页。
 - 图片响应启用条件请求与缓存头：缩略图 `max-age=86400`，原图/下载 `max-age=3600`。
-- 后续：FTS5（trigram）替换 `LIKE '%q%'` 搜索；定期 `ANALYZE`/`VACUUM`；按需增加复合索引。
+- 文件名搜索使用 FTS5 trigram 虚拟表 `images_fts`，查询词 ≥3 字符走 `MATCH`，短词或 FTS5 不可用时回退 `LIKE`；索引与 `images` 通过触发器同步，可用 `init_db.py --rebuild-search-index` 重建。
+- 列表分页支持 keyset 游标：`cursor`/`next_cursor` 绑定排序与最后一条记录，避免深层 `OFFSET`；首次请求仍返回完整 `total`。
+- 后续：窗口化数据源/元数据级虚拟化；定期 `ANALYZE`/`VACUUM`。
 
 ### 10.2 前端优化
 
@@ -561,10 +565,13 @@ PicGallery/
 - 图片网格与灯箱使用 `loading="lazy"`、`decoding="async"`；大网格使用 `medium` 缩略图。
 - 灯箱原图预加载增加 6MB 体积门槛与 120 条 URL 上限，切换时清理定时器；滚轮缩放按帧合并。
 - 动效仅使用 `transform/opacity`，虚拟列表不使用 `transition-group` 与全量 `will-change`，并支持 `prefers-reduced-motion`。
-- 后续：窗口化数据源/keyset 分页、响应式图片（srcset/WebP）、Element Plus 与 Lightbox 代码拆分。
+- 列表分页使用服务端 `next_cursor` 游标；前端保留 `nextCursor`，服务端返回 null 时停止加载。
+- 后续：窗口化数据源、响应式图片（srcset/WebP）、Element Plus 与 Lightbox 代码拆分。
 
 ### 10.3 后端与图片处理优化
 
 - 缩略图按需生成并落盘缓存；缩略图记录写入 `thumbnails` 表。
+- 扫描完成且状态置为 `completed` 后，后台线程按 id 分批预生成缺失的 `small` 缩略图；`THUMBNAIL_PREGENERATE` 控制开关，全局锁避免并发预生成。
+- 历史库可用 `scripts/sql-script/prebuild_thumbnails.py --limit/--folder` 分批补齐。
 - 扫描任务使用后台线程，进度每 10 个文件更新一次；100k 规模可进一步改为批量提交。
-- 10 万张规模的后续重点：缩略图预生成队列、WebP/AVIF、受限并发与失败占位缓存。
+- 10 万张规模的后续重点：窗口化数据源、WebP/AVIF、受限并发与失败占位缓存、真实数据压测。

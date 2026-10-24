@@ -106,4 +106,7 @@ PicGallery 是一个轻量级、响应式的个人相册管理系统。它支持
 ## 📝 使用建议
 
 - 建议在添加文件夹时使用**绝对路径**以确保扫描稳定性。
-- 大量图片扫描时，系统会在后台异步生成缩略图，初次加载可能稍有延迟。
+- 大量图片扫描时，系统会在后台异步生成缩略图，初次加载可能稍有延迟；扫描完成后还会后台预生成 small 缩略图。
+- 维护命令：
+  - 重建文件名搜索索引：`.\server\venv\Scripts\python.exe scripts\sql-script\init_db.py --rebuild-search-index`
+  - 分批补齐缩略图：`.\server\venv\Scripts\python.exe scripts\sql-script\prebuild_thumbnails.py --limit 500`

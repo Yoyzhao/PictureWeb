@@ -4,6 +4,7 @@ from datetime import datetime
 from PIL import Image
 from flask import current_app
 from app.utils.db import get_db
+from app.services.thumbnail import start_folder_thumbnail_prebuild
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff'}
 
@@ -82,6 +83,10 @@ def scan_folder(folder_path, folder_id):
         db.commit()
         
         print(f"Scan complete. Processed {count} images. Removed {removed_count} missing images.")
+
+        # Generate missing small thumbnails in the background so first browsing is not thumbnail-bound.
+        if current_app.config.get('THUMBNAIL_PREGENERATE', True):
+            start_folder_thumbnail_prebuild(current_app._get_current_object(), folder_id)
         
         return {
             'processed': count,

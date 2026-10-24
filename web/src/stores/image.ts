@@ -33,6 +33,7 @@ export const useImageStore = defineStore('image', () => {
   const imagesVersion = ref(0)
   const total = ref(0)
   const page = ref(1)
+  const nextCursor = ref<string | null>(null)
   const perPage = ref(50)
   const loading = ref(false)
   const showOnlyFavorites = ref(false)
@@ -56,12 +57,13 @@ export const useImageStore = defineStore('image', () => {
 
   const fetchImages = async (reset = false) => {
     if (showAdminView.value) return
-    if (!reset && images.value.length >= total.value) return
-    if (loading.value && !reset) return
+    if (!reset && !nextCursor.value) return
+    if (!reset && loading.value) return
 
     if (reset) {
       activeController?.abort()
       page.value = 1
+      nextCursor.value = null
       images.value = []
       imagesVersion.value++
       total.value = 0
@@ -82,7 +84,8 @@ export const useImageStore = defineStore('image', () => {
         is_favorite: showOnlyFavorites.value ? 'true' : undefined,
         sort_by: sortBy.value,
         sort_order: sortOrder.value,
-        q: searchQuery.value || undefined
+        q: searchQuery.value || undefined,
+        cursor: reset ? undefined : (nextCursor.value || undefined)
       }, controller.signal)
 
       if (controller.signal.aborted || seq !== requestSeq) return
@@ -102,11 +105,13 @@ export const useImageStore = defineStore('image', () => {
       }
 
       total.value = res.data.total
+      nextCursor.value = res.data.next_cursor || null
       page.value += 1
 
       // If the server returns an empty page before reaching total, stop pagination.
       if (data.length === 0 && images.value.length < total.value) {
         total.value = images.value.length
+        nextCursor.value = null
       }
     } catch (error: any) {
       const cancelled = error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError'

@@ -135,7 +135,9 @@ python prod_run.py
 ## 8. 维护与备份
 
 - **数据库备份**：定期备份 `data\database.db`
-- **升级注意**：升级到含索引优化的版本时，首次启动会在现有库上执行 `CREATE INDEX IF NOT EXISTS`；10 万级数据可能耗时较久，建议升级前先备份数据库
+- **升级注意**：升级到含索引优化与 FTS5 搜索的版本时，首次启动会在现有库上执行 `CREATE INDEX`、创建 `images_fts` 并重建索引；10 万级数据可能耗时较久，建议升级前先备份数据库并预留启动时间
+- **缩略图补齐**：生产首次升级后可分批执行 `.\server\venv\Scripts\python.exe scripts\sql-script\prebuild_thumbnails.py --limit 500`，避免一次性占用过多 CPU
+- **搜索索引维护**：如搜索异常，可执行 `init_db.py --rebuild-search-index` 重建 FTS5 索引
 - **缓存清理**：可安全删除 `data\cache` 内容，系统按需重新生成
 - **日志**：查看部署副本 `logs\` 目录；日志按启动时间滚动
 - **配置变更**：修改 `config.yaml` 后重启服务；修改 `.env` 后必须重启（密钥在启动时加载）

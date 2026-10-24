@@ -49,6 +49,61 @@ def close_db(e=None):
     if db is not None:
         db.close()
 
+def ensure_fts(db):
+    """Create the trigram FTS5 index and keep it in sync with the images table."""
+    try:
+        db.executescript("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS images_fts USING fts5(
+                file_name,
+                content='images',
+                content_rowid='id',
+                tokenize='trigram'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS images_fts_ai AFTER INSERT ON images BEGIN
+                INSERT INTO images_fts(rowid, file_name) VALUES (new.id, new.file_name);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS images_fts_ad AFTER DELETE ON images BEGIN
+                INSERT INTO images_fts(images_fts, rowid, file_name)
+                VALUES ('delete', old.id, old.file_name);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS images_fts_au AFTER UPDATE OF file_name ON images BEGIN
+                INSERT INTO images_fts(images_fts, rowid, file_name)
+                VALUES ('delete', old.id, old.file_name);
+                INSERT INTO images_fts(rowid, file_name) VALUES (new.id, new.file_name);
+            END;
+        """)
+
+        # External-content FTS tables report the content table row count, so inspect docsize
+        # to detect an index that has not been populated yet.
+        fts_count = db.execute("SELECT COUNT(*) FROM images_fts_docsize").fetchone()[0]
+        image_count = db.execute("SELECT COUNT(*) FROM images").fetchone()[0]
+        if fts_count != image_count:
+            print(f"Rebuilding FTS index ({image_count} rows, indexed {fts_count})...")
+            db.execute("INSERT INTO images_fts(images_fts) VALUES('rebuild')")
+
+        db.commit()
+        current_app.config['FTS5_ENABLED'] = True
+    except Exception as e:
+        # Older SQLite builds may not include FTS5; search falls back to LIKE.
+        current_app.config['FTS5_ENABLED'] = False
+        print(f"FTS5 unavailable, falling back to LIKE search: {e}")
+
+
+def rebuild_fts():
+    """Force a full rebuild of the search index (maintenance/CLI use)."""
+    db = get_db()
+    try:
+        db.execute("INSERT INTO images_fts(images_fts) VALUES('rebuild')")
+        db.commit()
+        return True
+    except Exception as e:
+        print(f"FTS rebuild failed: {e}")
+        return False
+
+
 def migrate_db(db):
     """
     Check and perform database migrations.
@@ -88,6 +143,9 @@ def migrate_db(db):
             CREATE INDEX IF NOT EXISTS idx_folders_public ON folders(is_public);
         """)
         db.commit()
+
+        # 4. Full-text index for filename search (falls back to LIKE if unavailable).
+        ensure_fts(db)
 
     except Exception as e:
         print(f"Migration error: {e}")

@@ -65,7 +65,7 @@
 |------|------|------|----------|
 | 认证 | `routes/auth.py` | `/api/auth` | `POST /login`、`GET /me`；签名 Token，管理员凭据来自 `.env` |
 | 文件夹 | `routes/folder.py` | `/api/folders` | 列表（按角色过滤）、新增并异步扫描、PATCH、删除（可选硬删除到回收站）、重新扫描 |
-| 图片 | `routes/image.py` | `/api/images` | 分页列表/详情、重命名、收藏切换、缩略图/原图/下载、批量移动/删除、回收站列表/缩略图/恢复/清空 |
+| 图片 | `routes/image.py` | `/api/images` | 分页列表（keyset cursor/next_cursor、FTS5 搜索）、详情、重命名、收藏切换、缩略图/原图/下载、批量移动/删除、回收站列表/缩略图/恢复/清空 |
 | 管理 | `routes/admin.py` | `/api/admin` | 全模块管理员校验；缓存统计/清理、用户 CRUD、文件夹列表/删除、权限 CRUD、系统设置读写 |
 | 公开设置 | `routes/settings.py` | `/api/settings` | 匿名可读；仅返回 `HOTKEYS` 与 `ENABLE_PRELOAD`，供前端快捷键/预加载使用 |
 | 健康检查 | `app/__init__.py` | `/api/health` | 返回 `{"status":"ok"}` |
@@ -86,6 +86,8 @@
 | 数据库初始化 | `.\server\venv\Scripts\python.exe scripts\sql-script\init_db.py` | 建表并按 `.env` 创建管理员/访客（已有管理员不覆盖密码） |
 | 重置管理员密码 | `.\server\venv\Scripts\python.exe scripts\sql-script\init_db.py --reset-admin-password` | 将 `.env` 的 `DEFAULT_ADMIN_PASSWORD` 同步到数据库 |
 | 时间字段规范化 | `.\server\venv\Scripts\python.exe scripts\sql-script\normalize_db.py` | 历史脚本，会把时间字段中的 `T` 替换为空格 |
+| 重建搜索索引 | `.\server\venv\Scripts\python.exe scripts\sql-script\init_db.py --rebuild-search-index` | 重建 FTS5 `images_fts`；FTS5 不可用时搜索回退 LIKE |
+| 缩略图预生成 | `.\server\venv\Scripts\python.exe scripts\sql-script\prebuild_thumbnails.py --limit 500 [--folder ID]` | 分批补齐缺失的 small 缩略图；全库执行耗 CPU，建议低峰分批 |
 | 生产运行 | 部署副本内 `python prod_run.py` | Waitress，读取部署副本 `config.yaml` 与 `.env`，端口 5000 |
 | 自动化测试 | 无 | 仓库无 pytest / vitest / playwright 配置 |
 | 浏览器验证 | Chrome DevTools MCP 或 Browser Use | 开发入口 `http://localhost:5173`，生产入口 `http://127.0.0.1:5000` |
@@ -129,6 +131,7 @@
 | `LOG_LEVEL` | 日志级别 | `config.yaml` | 否 |
 | `ANONYMOUS_ACCESS` | 是否允许匿名访问公开文件夹 | `config.yaml` | 否 |
 | `THUMBNAIL_QUALITY` | 缩略图 JPEG 质量 | `config.yaml` | 否 |
+| `THUMBNAIL_PREGENERATE` | 扫描完成后是否后台预生成小尺寸缩略图 | `config.yaml` | 否 |
 | `SCAN_RECURSIVE` | 是否递归扫描 | `config.yaml` | 否 |
 | `SCAN_EXTENSIONS` | 扫描的图片后缀 | `config.yaml` | 否 |
 | `ENABLE_PRELOAD` | Lightbox 预加载开关 | `config.yaml` | 否 |

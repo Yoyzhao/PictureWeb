@@ -9,6 +9,7 @@ TRASH_DIR: "data/trash"         # 应用内回收站目录
 LOG_LEVEL: "INFO"               # 日志级别 (DEBUG, INFO, ERROR)
 ANONYMOUS_ACCESS: true          # 是否允许匿名访问公开文件夹
 THUMBNAIL_QUALITY: 90           # 缩略图质量 (1-100)
+THUMBNAIL_PREGENERATE: true     # 扫描完成后后台预生成小尺寸缩略图
 SCAN_RECURSIVE: true            # 是否递归扫描文件夹
 SCAN_EXTENSIONS: ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff" # 扫描的图片后缀名
 ENABLE_PRELOAD: true            # Lightbox 原图预加载
