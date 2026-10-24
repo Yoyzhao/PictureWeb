@@ -225,3 +225,17 @@ servy-cli status --name="PictureWeb"
 - **烟测**：使用生产数据库副本临时启动 Flask test client，`/api/health`、`/api/settings`、`/api/images` 均 200；FTS5 在副本上成功创建（20,993 条），未改动生产库。
 - **首次启动说明**：启动时会在生产库创建 FTS5 虚拟表/触发器并重建索引（20,993 行），可能耗时数秒；建议观察 `logs/`。
 - **备份**：数据库 `data\backups\database-20261024-222640.db`；旧代码与旧 dist `D:\Workspace\_deploy\_backup_PicGallery_20261024-222640`。
+
+## 11. 本次部署记录（2026-10-25 02:00）
+
+- **目标目录**：`D:\Workspace\_deploy\PicGallery`；更新前 `PictureWeb` 服务已停止，更新完成后已启动并处于 Running。
+- **部署内容**：`server/app`（11 个文件，含新增 `routes/bookmarks.py` 与本轮文件夹生命周期修复）、`scripts/sql-script`（3 个文件）、`web/dist`（30 个文件）、`prod_run.py`、`server/run.py`、`server/requirements.txt`、`.env.example`。源文件与部署副本逐文件 SHA256 一致。
+- **保持不变**：生产 `config.yaml`、`.env`、`data/database.db`、`data/` 其余数据、`F:\_PicCache`、`logs/`、`server/venv`；同步前后 `config.yaml` 与数据库 SHA256 未变。
+- **备份**：数据库 `data\backups\database-20261025-015336.db`（SHA256 `DAFB17D6EAC63E4B676F277EFBCCD6884E078729DD7474D4CBE01EDC6A6EC3A7`）；旧代码、旧 dist、旧入口与配置备份在 `D:\Workspace\_deploy\_backup_PicGallery_20261025-015336`。
+- **依赖**：生产 venv 为 Python 3.13.13；`pip check` 无冲突，未新增依赖。
+- **迁移验证**：先用生产库副本以新代码干跑，`image_bookmarks` 表创建成功，公开文件夹与图片接口正常，库内 5 文件夹/20,991 图片/204 收藏/69 回收站记录保持不变。
+- **服务启动**：Windows 服务 `PictureWeb`（Servy 托管，LocalSystem）启动成功，监听 `0.0.0.0:5000`；`logs/app.log` 无新错误，`err.log` 无新增。
+- **生产库结果**：`image_bookmarks` 表已创建；FTS docsize 20,991 与图片数一致；扫描状态均为 `completed`。
+- **烟测**：`/api/health` 200、`/api/settings` 200、匿名 `/api/folders` 返回公开文件夹 `BG`、匿名 `/api/images` 返回 43 张公开图片、首页 `index.html` 引用新构建资源 `index-Da-Lftjn.js` / `index-Bl2zFTq.css`；匿名 `/api/bookmarks` 返回 401。
+- **登录说明**：生产 `.env` 中的管理员密码与现有生产库密码不一致，使用 `.env` 密码登录返回 401（既有状态，非本次部署引入）；如需同步，需用户确认后执行 `init_db.py --reset-admin-password`。
+- **注意**：`web/dist` 中保留了旧哈希静态资源，当前 `index.html` 仅引用新资源，不影响访问，可在下次部署时清理。

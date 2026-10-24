@@ -97,8 +97,8 @@
 
 | 服务 | 本地地址 | 端口 | 备注 |
 |------|---------|------|------|
-| 生产应用（Flask + Waitress） | `http://0.0.0.0:5000` | 5000 | 部署副本 `D:\Workspace\_deploy\PicGallery`，使用生产库 `data\database.db`；2026-10-24 实测健康 |
-| 开发后端（Flask dev server） | `http://127.0.0.1:5001` | 5001 | 仓库根 `config.yaml`，使用测试库；2026-10-24 启动验证后已停止 |
+| 生产应用（Flask + Waitress） | `http://0.0.0.0:5000` | 5000 | 部署副本 `D:\Workspace\_deploy\PicGallery`，使用生产库 `data\database.db`；2026-10-25 02:00 更新并运行 |
+| 开发后端（Flask dev server） | `http://127.0.0.1:5001` | 5001 | 仓库根 `config.yaml`，使用测试库；当前为开发验证运行中 |
 | 前端开发（Vite） | `http://localhost:5173` | 5173 | Vite 默认值，`/api` 代理到 5001 |
 | 数据库 | 本地文件 | - | 无网络端口 |
 | 缓存/回收站 | `data/cache`、`data/trash` | - | 本地开发目录，已被 Git 忽略 |
@@ -107,7 +107,7 @@
 
 | 组件 | 版本 | 连接方式/备注 |
 |------|------|---------------|
-| 主数据库（测试） | SQLite3 | `data/db/database.db`；4 个文件夹、23,851 条图片记录、3 个用户 |
+| 主数据库（测试） | SQLite3 | `data/db/database.db`；4 个文件夹、21,159 条图片记录、3 个用户（2026-10-25 实测） |
 | 主数据库（生产） | SQLite3 | 部署副本 `D:\Workspace\_deploy\PicGallery\data\database.db`；不得用于测试写入 |
 | 缓存 | 无独立缓存服务 | 缩略图文件缓存 + 浏览器端预加载 |
 | 对象存储 | 无 | 直接读写本地文件系统 |
