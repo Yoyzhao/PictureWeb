@@ -19,7 +19,7 @@
 | 鉴权方案 | `itsdangerous` 签名 Token（`SECRET_KEY` 来自 `.env`，默认有效期 7 天） | 不再使用 `token-{id}` 或 `admin-token` 等硬编码 Token |
 | 配置管理 | `config.yaml`（非敏感运行配置）+ `.env`（密钥与管理员初始账号） | `python-dotenv` 加载；真实值不入库 |
 | 测试方案 | 无自动化测试；前端 `vue-tsc` 类型检查，后端 `py_compile` + Flask test client 冒烟 | 浏览器验证可用 Chrome DevTools MCP / Browser Use |
-| 部署形态 | Windows 主机 + Waitress + NSSM（可选服务化） | 生产副本独立部署，见第 5 节 |
+| 部署形态 | Windows 主机 + Waitress + Servy（Windows 服务） | 生产副本独立部署，见第 5 节 |
 
 ## 2. 版本信息
 
@@ -218,11 +218,11 @@
 
 ## 13. 已知环境风险（2026-10-24 核对）
 
-1. **生产副本尚未同步本轮代码**：生产仍在运行旧版本（mock token、旧配置、旧管理员密码）。按用户要求暂缓，待开发完成后统一更新：同步代码、安装 `python-dotenv`、创建生产 `.env`（`SECRET_KEY` 与管理员密码必须独立于开发环境），执行 `init_db.py --reset-admin-password` 更新生产管理员密码，并确认生产 `config.yaml` 仍指向生产库与生产缓存目录。
+1. **生产副本已部署新版本（2026-10-24 22:36），服务未启动**：`D:\Workspace\_deploy\PicGallery` 已同步 `server/app`、`scripts/sql-script`、`web/dist`、`prod_run.py`，生产 `config.yaml`（`DB_PATH=data/database.db`、`CACHE_DIR=F:\_PicCache`、`TRASH_DIR=F:\_PicCache\trash`）与 `data/database.db` 未改动。已创建生产 `.env`（随机 `SECRET_KEY`；现有库管理员密码未重置，`.env` 中生成密码仅用于新建库或后续 `--reset-admin-password`）。生产 venv 为 Python 3.13.13，已安装 `python-dotenv==1.0.1`、`waitress==3.0.1`；首次启动会在生产库（20,993 张图片）上创建 FTS5 索引。部署前备份：`data\backups\database-20261024-222640.db` 与 `D:\Workspace\_deploy\_backup_PicGallery_20261024-222640`。
 2. **Token 存在 localStorage**：签名 Token 无法被伪造，但仍受 XSS 影响；前端已改为 401 时自动清理失效凭证，后续可评估迁移到 httpOnly Cookie。
 3. **图片读取接口未做权限校验**：`/api/images/<id>/raw`、`/thumbnail`、`/download` 等目前不校验登录与文件夹权限，已知历史问题；对外暴露前需补服务端权限校验。
 4. **CORS 允许所有来源**：当前 `CORS(app)` 未限制 Origin；生产应按可信来源收紧。
 5. **访客账号无密码**：`guest` 登录为匿名只读设计，仅在 `ANONYMOUS_ACCESS` 开启时存在；不得赋予其编辑权限。
 6. **无自动化测试、无 ESLint 配置**：回归依赖人工，质量门控能力不足。
 7. **独立 API 契约文档尚未建立**：`PictureWeb技术架构文档.md` 第 4 节已按当前代码更新；`docs/tech/api-contract.md` 尚未单独维护，复杂接口迭代前按需补建。
-8. **时间字段口径混用**：SQLite `CURRENT_TIMESTAMP` 为 UTC，`modified_time` 为本地时间；排序、统计、跨时区展示可能偏差。
+8. **时间字段口径混用**：SQLite `CURRENT_TIMESTAMP` 为 UTC、`modified_time` 为本地时间；排序、统计、跨时区展示可能偏差。

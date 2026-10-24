@@ -7,7 +7,7 @@
 - **Python 3.12**（本机为 `D:\Python\Python312\python.exe`；3.13 也可用，但项目依赖按 3.12 验证）
 - **Node.js v18+ & npm**
 - **PowerShell 7**
-- 可选：**NSSM**（注册 Windows 服务）
+- **Servy**（注册 Windows 服务，当前生产使用）：https://github.com/aelassas/servy
 
 ### 1.1 配置加速镜像（推荐）
 
@@ -111,26 +111,89 @@ DEFAULT_ADMIN_PASSWORD=<强密码>
 
 ## 7. 启动服务
 
-### 7.1 直接运行（推荐）
+### 7.1 手动运行（调试/临时）
 
 ```powershell
 cd D:\Workspace\_deploy\PicGallery
-python prod_run.py
+.\server\venv\Scripts\python.exe prod_run.py
 ```
 
 服务监听 `http://0.0.0.0:5000`，由 Waitress 托管。
 
-### 7.2 作为 Windows 服务运行
+### 7.2 作为 Windows 服务运行（Servy，生产使用）
 
-1. 下载 NSSM：https://nssm.cc/download
-2. 安装服务：
-   ```powershell
-   nssm install PicGallery
-   ```
-3. 配置：
-   - **Path**: `D:\Workspace\_deploy\PicGallery\server\venv\Scripts\python.exe`
-   - **Startup directory**: `D:\Workspace\_deploy\PicGallery`
-   - **Arguments**: `prod_run.py`
+生产环境使用 [Servy](https://github.com/aelassas/servy) 注册 Windows 服务，服务配置文件为仓库内 `docs/deploy/picweb.json`（服务名 `PictureWeb`）。
+
+#### 7.2.1 安装 Servy
+
+任选一种方式安装，并确保 `servy-cli` 已加入系统 PATH：
+
+```powershell
+winget install servy
+# 或
+choco install -y servy
+# 或
+scoop bucket add extras; scoop install servy
+```
+
+后续命令需在**管理员 PowerShell**中执行。
+
+#### 7.2.2 配置文件关键字段
+
+`docs/deploy/picweb.json` 当前配置：
+
+| 字段 | 值 | 说明 |
+|------|----|------|
+| `Name` / `DisplayName` | `PictureWeb` | 服务名与显示名 |
+| `ExecutablePath` | `D:\Workspace\_deploy\PicGallery\server\venv\Scripts\python.exe` | 生产 venv |
+| `StartupDirectory` | `D:\Workspace\_deploy\PicGallery` | 工作目录 |
+| `Parameters` | `D:\Workspace\_deploy\PicGallery\prod_run.py` | Waitress 入口 |
+| `StartupType` | `2` | Automatic（随系统启动） |
+| `Priority` | `2` | Normal |
+| `StdoutPath` / `StderrPath` | `logs\app.log` / `logs\err.log` | 应用输出日志 |
+| `EnableDateRotation` / `DateRotationType` / `MaxRotations` | `true` / `0` / `100` | 按日轮转，保留 100 份 |
+| `EnableConsoleUI` | `false` | 后台运行并重定向 stdout/stderr |
+| `EnableHealthMonitoring` | `false` | 当前未启用健康检查；`RecoveryAction` 仅在启用后生效 |
+
+> 配置文件只包含路径与运行参数，不包含 `SECRET_KEY`、数据库密码等敏感信息；密钥仍由部署根目录 `.env` 提供。
+
+#### 7.2.3 首次安装
+
+```powershell
+servy-cli import --config="json" --path="D:\Workspace\PicGallery\docs\deploy\picweb.json" --install
+servy-cli status --name="PictureWeb"
+servy-cli start --name="PictureWeb"
+```
+
+安装后可用 Windows 服务管理器确认 `PictureWeb` 的启动类型为“自动”。
+
+#### 7.2.4 更新代码或服务配置
+
+```powershell
+servy-cli stop --name="PictureWeb"
+# 部署新代码与 web/dist，按需修改 picweb.json
+servy-cli import --config="json" --path="D:\Workspace\PicGallery\docs\deploy\picweb.json" --install
+servy-cli start --name="PictureWeb"
+servy-cli status --name="PictureWeb"
+```
+
+> 若当前 Servy 版本对已存在服务拒绝重复导入，先执行 `servy-cli uninstall --name="PictureWeb"`（仅移除服务注册，不删除应用数据），再重新 `import --install`。
+
+#### 7.2.5 常用命令
+
+| 操作 | 命令 |
+|------|------|
+| 查看状态 | `servy-cli status --name="PictureWeb"` |
+| 启动/停止/重启 | `servy-cli start/stop/restart --name="PictureWeb"` |
+| 查看服务配置 | `servy-cli show --name="PictureWeb"` |
+| 列出服务 | `servy-cli show` |
+| 导出配置 | `servy-cli export --name="PictureWeb" --config="json" --path="D:\Workspace\_deploy\PicGallery\picweb-export.json"` |
+| 卸载服务 | `servy-cli uninstall --name="PictureWeb"` |
+
+- 服务日志：`D:\Workspace\_deploy\PicGallery\logs\app.log` 与 `err.log`，按日轮转，最多 100 份。
+- 默认以 LocalSystem 运行，需保证对部署目录、`F:\_PicCache` 与 `logs\` 有读写权限。
+- 如需进程崩溃自动重启，可在 `picweb.json` 中启用 `EnableHealthMonitoring` 并设置 `RecoveryAction`，重新导入后重启服务。
+- 首次启动仍会在生产库创建 FTS5 索引（约 20,993 行），请预留启动时间。
 
 ## 8. 维护与备份
 
@@ -139,7 +202,7 @@ python prod_run.py
 - **缩略图补齐**：生产首次升级后可分批执行 `.\server\venv\Scripts\python.exe scripts\sql-script\prebuild_thumbnails.py --limit 500`，避免一次性占用过多 CPU
 - **搜索索引维护**：如搜索异常，可执行 `init_db.py --rebuild-search-index` 重建 FTS5 索引
 - **缓存清理**：可安全删除 `data\cache` 内容，系统按需重新生成
-- **日志**：查看部署副本 `logs\` 目录；日志按启动时间滚动
+- **日志**：查看部署副本 `logs\` 目录；`app.log` / `err.log` 由 Servy 按日轮转，保留 100 份
 - **配置变更**：修改 `config.yaml` 后重启服务；修改 `.env` 后必须重启（密钥在启动时加载）
 
 ## 9. 常见问题
@@ -149,3 +212,16 @@ python prod_run.py
 - **登录后立即失效**：`SECRET_KEY` 变更会使旧 Token 失效，重新登录即可（前端会自动清理失效凭证）
 - **路径问题**：`DB_PATH`、`CACHE_DIR`、`TRASH_DIR` 可使用相对部署根目录的路径或 Windows 绝对路径
 - **权限不足**：扫描与删除操作需要文件系统读写权限；建议以具备权限的账号运行服务
+
+## 10. 本次部署记录（2026-10-24 22:36）
+
+- **目标目录**：`D:\Workspace\_deploy\PicGallery`；服务已由用户停止，本次未启动。
+- **部署内容**：`server/app`、`scripts/sql-script`、`web/dist`、`prod_run.py`、`server/run.py`、`server/requirements.txt`、`.env.example`。
+- **保持不变**：生产 `config.yaml`、`data/database.db`、`data/` 其余数据、`F:\_PicCache`、`logs/`、`server/venv` 原有包；部署前后 `config.yaml` 与数据库 SHA256 一致。
+- **生产配置**：`DB_PATH=D:\Workspace\_deploy\PicGallery\data\database.db`、`CACHE_DIR=F:\_PicCache`、`TRASH_DIR=F:\_PicCache\trash`、`SERVER_PORT=5000`。
+- **生产 `.env`**：本次新建，含随机 `SECRET_KEY`；现有数据库管理员密码未重置，`.env` 中的 `DEFAULT_ADMIN_PASSWORD` 仅在新建库或执行 `--reset-admin-password` 时生效。
+- **依赖**：生产 venv 为 Python 3.13.13，已安装 `python-dotenv==1.0.1`、`waitress==3.0.1`；`py_compile` 通过。
+- **服务方式**：Servy，配置文件 `docs/deploy/picweb.json`（服务名 `PictureWeb`）；本次仅部署产物，未安装/启动服务。
+- **烟测**：使用生产数据库副本临时启动 Flask test client，`/api/health`、`/api/settings`、`/api/images` 均 200；FTS5 在副本上成功创建（20,993 条），未改动生产库。
+- **首次启动说明**：启动时会在生产库创建 FTS5 虚拟表/触发器并重建索引（20,993 行），可能耗时数秒；建议观察 `logs/`。
+- **备份**：数据库 `data\backups\database-20261024-222640.db`；旧代码与旧 dist `D:\Workspace\_deploy\_backup_PicGallery_20261024-222640`。
