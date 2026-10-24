@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import api from '@/api'
-import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading, Rank, InfoFilled, CollectionTag } from '@element-plus/icons-vue'
+import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading, Rank, InfoFilled, CollectionTag, View, Hide } from '@element-plus/icons-vue'
+import { storeToRefs } from 'pinia'
 import type { Image as ImageItem } from '@/stores/image'
 import { useImageStore } from '@/stores/image'
 import { useFolderStore } from '@/stores/folder'
 import { useAuthStore } from '@/stores/auth'
 import { useBookmarkStore } from '@/stores/bookmark'
 import { useHotkeyStore } from '@/stores/hotkey'
+import { useUIStore } from '@/stores/ui'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import ImageInfoDialog from './ImageInfoDialog.vue'
 
@@ -28,6 +30,8 @@ const imageStore = useImageStore()
 const folderStore = useFolderStore()
 const authStore = useAuthStore()
 const bookmarkStore = useBookmarkStore()
+const uiStore = useUIStore()
+const { showLightboxImageInfo } = storeToRefs(uiStore)
 const hotkeyStore = useHotkeyStore()
 const hotkeys = computed(() => hotkeyStore.hotkeys)
 const canEdit = computed(() => !!authStore.user && authStore.user.role !== 'guest')
@@ -560,6 +564,18 @@ onUnmounted(() => {
         </button>
         <button title="信息" aria-label="查看图片信息" @click="showInfoDialog = true"><el-icon><InfoFilled /></el-icon></button>
         <button
+          class="btn-info-toggle"
+          :class="{ active: showLightboxImageInfo }"
+          :title="showLightboxImageInfo ? '隐藏底部图片信息' : '显示底部图片信息'"
+          :aria-label="showLightboxImageInfo ? '隐藏底部图片信息' : '显示底部图片信息'"
+          @click="uiStore.toggleLightboxImageInfo()"
+        >
+          <el-icon>
+            <View v-if="showLightboxImageInfo" />
+            <Hide v-else />
+          </el-icon>
+        </button>
+        <button
           v-if="canEdit"
           class="btn-bookmark"
           :class="{ active: isImageBookmarked }"
@@ -575,7 +591,7 @@ onUnmounted(() => {
         <button title="关闭" aria-label="关闭" class="close-btn" @click="emit('close')"><el-icon><Close /></el-icon></button>
       </div>
 
-      <div class="image-meta" v-if="image" @touchstart.stop @touchend.stop @click.stop>
+      <div class="image-meta" v-if="image && showLightboxImageInfo" @touchstart.stop @touchend.stop @click.stop>
         <span id="meta-filename" :title="image.file_name">{{ truncatedFileName }}</span>
         <span class="meta-divider">|</span>
         <span id="meta-resolution">{{ image.width }} x {{ image.height }}</span>
@@ -874,7 +890,8 @@ onUnmounted(() => {
     color: #ffb74d;
 }
 
-.lightbox-toolbar .btn-bookmark.active {
+.lightbox-toolbar .btn-bookmark.active,
+.lightbox-toolbar .btn-info-toggle.active {
     color: var(--primary);
     background: var(--primary-soft);
 }

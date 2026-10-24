@@ -1,8 +1,20 @@
 import { defineStore } from 'pinia'
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useStorage } from '@vueuse/core'
 
 export const useUIStore = defineStore('ui', () => {
   const isSidebarCollapsed = ref(false)
+  // Display preferences persist across sessions.
+  const showGridImageInfo = useStorage('picgallery.showGridImageInfo', true)
+  const showLightboxImageInfo = useStorage('picgallery.showLightboxImageInfo', true)
+
+  const toggleGridImageInfo = () => {
+    showGridImageInfo.value = !showGridImageInfo.value
+  }
+
+  const toggleLightboxImageInfo = () => {
+    showLightboxImageInfo.value = !showLightboxImageInfo.value
+  }
 
   const toggleSidebar = () => {
     isSidebarCollapsed.value = !isSidebarCollapsed.value
@@ -26,7 +38,11 @@ export const useUIStore = defineStore('ui', () => {
 
   return {
     isSidebarCollapsed,
+    showGridImageInfo,
+    showLightboxImageInfo,
     toggleSidebar,
+    toggleGridImageInfo,
+    toggleLightboxImageInfo,
     checkOrientation
   }
 })

@@ -5,17 +5,21 @@ import { useFolderStore } from '@/stores/folder'
 import { useAuthStore } from '@/stores/auth'
 import { storeToRefs } from 'pinia'
 import { useIntersectionObserver } from '@vueuse/core'
-import { Star, More, Loading, InfoFilled, Download, Delete, Rank, Edit, CollectionTag } from '@element-plus/icons-vue'
+import { Star, More, Loading, InfoFilled, Download, Delete, Rank, Edit, CollectionTag, Select, View, Hide } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import VirtualWaterfall from './common/VirtualWaterfall.vue'
 import ImageInfoDialog from './ImageInfoDialog.vue'
 import { useBookmarkStore } from '@/stores/bookmark'
+import { useUIStore } from '@/stores/ui'
 
 const imageStore = useImageStore()
 const bookmarkStore = useBookmarkStore()
+const uiStore = useUIStore()
+const { showGridImageInfo } = storeToRefs(uiStore)
+const multiSelectMode = ref(false)
 const {
   images, imagesVersion, loading, total, showOnlyFavorites, sortBy, sortOrder,
-  selectedImageIds, gridSize, scrollAnchorId, scrollAnchorVersion
+  searchQuery, selectedImageIds, gridSize, scrollAnchorId, scrollAnchorVersion
 } = storeToRefs(imageStore)
 const currentViewAnchorId = ref<number | null>(null)
 const currentPositionBookmarked = computed(() =>
@@ -210,7 +214,10 @@ const columnWidthMap = {
 
 const currentColumnWidth = computed(() => columnWidthMap[gridSize.value])
 const thumbnailSize = computed(() => gridSize.value === 'large' ? 'medium' : 'small')
-const metaHeight = computed(() => gridSize.value === 'small' ? 32 : 68)
+const metaHeight = computed(() => {
+  if (!showGridImageInfo.value) return 0
+  return gridSize.value === 'small' ? 32 : 68
+})
 
 const formatDate = (value: any) => {
   if (value === null || value === undefined || value === '') return '-'
@@ -234,8 +241,8 @@ const toggleFavorite = (img: any) => {
 
 const isSelected = (id: number) => selectedIdSet.value.has(id)
 
-const handleCardClick = (img: any, event: MouseEvent) => {
-  if (event.ctrlKey || event.metaKey) {
+const handleCardClick = (img: any) => {
+  if (multiSelectMode.value) {
     imageStore.toggleImageSelection(img.id)
   } else {
     emit('open-lightbox', img)
@@ -243,8 +250,22 @@ const handleCardClick = (img: any, event: MouseEvent) => {
 }
 
 const toggleSelection = (id: number) => {
+  if (!multiSelectMode.value) return
   imageStore.toggleImageSelection(id)
 }
+
+const toggleMultiSelect = () => {
+  multiSelectMode.value = !multiSelectMode.value
+  // Entering or leaving selection mode always starts from a clean selection.
+  imageStore.clearSelection()
+}
+
+// Changing folder/search/sort leaves selection mode to avoid accidental picking in a new view.
+watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () => {
+  if (!multiSelectMode.value) return
+  multiSelectMode.value = false
+  imageStore.clearSelection()
+})
 </script>
 
 <template>
@@ -254,6 +275,30 @@ const toggleSelection = (id: number) => {
           <h2 class="current-folder">{{ currentTitle }}</h2>
           <div class="view-options">
               <span class="item-count">共 {{ total }} 张图片</span>
+              <el-button
+                v-if="!isGuest"
+                size="small"
+                class="grid-toggle-btn"
+                :class="{ 'is-active': multiSelectMode }"
+                :title="multiSelectMode ? '退出多选并清空选择' : '进入多选模式'"
+                @click="toggleMultiSelect"
+              >
+                <el-icon><Select /></el-icon>
+                <span>{{ multiSelectMode ? '退出多选' : '多选' }}</span>
+              </el-button>
+              <el-button
+                size="small"
+                class="grid-toggle-btn"
+                :class="{ 'is-active': showGridImageInfo }"
+                :title="showGridImageInfo ? '隐藏卡片下方的图片信息' : '显示卡片下方的图片信息'"
+                @click="uiStore.toggleGridImageInfo()"
+              >
+                <el-icon>
+                  <View v-if="showGridImageInfo" />
+                  <Hide v-else />
+                </el-icon>
+                <span>信息</span>
+              </el-button>
               <el-button
                 v-if="bookmarkStore.canBookmark"
                 size="small"
@@ -304,10 +349,10 @@ const toggleSelection = (id: number) => {
       <template #default="{ item: img, index }">
         <div 
           class="img-card"
-          :class="{ selected: isSelected(img.id) }"
-          @click="handleCardClick(img, $event)"
+          :class="{ selected: isSelected(img.id), 'multi-select': multiSelectMode }"
+          @click="handleCardClick(img)"
         >
-          <div class="card-checkbox" @click.stop="toggleSelection(img.id)">
+          <div v-if="multiSelectMode" class="card-checkbox" @click.stop="toggleSelection(img.id)">
               <el-checkbox :model-value="isSelected(img.id)" :aria-label="`选择 ${img.file_name}`"></el-checkbox>
           </div>
           <img
@@ -340,14 +385,14 @@ const toggleSelection = (id: number) => {
                   </template>
               </el-dropdown>
           </div>
-          <div class="img-info" v-if="gridSize !== 'small'">
+          <div class="img-info" v-if="showGridImageInfo && gridSize !== 'small'">
             <div class="img-name">{{ img.file_name }}</div>
             <div class="img-meta">
               {{ img.width }} x {{ img.height }} | {{ (img.file_size / 1024 / 1024).toFixed(2) }} MB | 
               {{ formatDate(img.modified_time) }}
             </div>
           </div>
-          <div class="img-info-mini" v-else>
+          <div class="img-info-mini" v-else-if="showGridImageInfo">
              <div class="img-name-mini">{{ img.file_name }}</div>
           </div>
         </div>
@@ -512,6 +557,12 @@ const toggleSelection = (id: number) => {
 .img-card.selected .card-checkbox {
     opacity: 1;
     transform: scale(1.15); /* Slightly larger on hover/selected for better visibility */
+}
+
+/* 多选模式：复选框常显，不依赖 hover */
+.img-card.multi-select .card-checkbox {
+    opacity: 1;
+    transform: scale(1);
 }
 
 :deep(.card-checkbox .el-checkbox__inner) {
@@ -817,14 +868,16 @@ const toggleSelection = (id: number) => {
 .btn-primary { background: var(--primary); color: white; }
 .btn-danger { background: #dc3545; color: white; }
 
-.save-bookmark-btn.is-active {
+.save-bookmark-btn.is-active,
+.grid-toggle-btn.is-active {
     color: var(--primary);
     border-color: var(--primary);
     background: var(--primary-soft);
 }
 
 @media (max-width: 768px) {
-    .save-bookmark-btn {
+    .save-bookmark-btn,
+    .grid-toggle-btn {
         height: 44px;
     }
 }
