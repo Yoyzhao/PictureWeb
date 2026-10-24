@@ -1,7 +1,7 @@
 # 前端渲染性能与 UI 优化
 
 - **状态**：活跃
-- **关联 CHG/任务**：`CHG-20261024-02` / T-008 ~ T-012
+- **关联 CHG/任务**：`CHG-20261024-02`、`CHG-20261024-04` / T-008 ~ T-012、T-017
 - **所属里程碑**：M2 前端性能与 UI 优化
 - **最后更新**：2026-10-24
 
@@ -94,22 +94,46 @@
 - 新增公开接口 `GET /api/settings`，只返回 `HOTKEYS` 与 `ENABLE_PRELOAD`；修复匿名用户访问 `/api/admin/settings` 产生 401 控制台错误。
 - FTS5 搜索、keyset 游标分页与缩略图后台预生成见 `search-pagination-thumbnails-搜索分页与缩略图优化.md`。
 
+### 第二轮：首屏指标与构建体积（2026-10-24 下午）
+
+在首轮基础上按 DevTools 追踪结论继续优化，重点解决 CLS、LCP 发现时机与首屏传输体积：
+
+- **CLS 归零**：DevTools 定位到缩略图未预留尺寸导致卡片 `.img-info` 位移（CLS 0.184）。`ImageGrid.vue` / `TrashPage.vue` 的 `<img>` 绑定 `width`/`height` 与 `aspect-ratio`，缺失尺寸时回退 `4 / 3`；虚拟列表把 `index` 透传给卡片。
+- **LCP 优先级**：首屏前 15 张图由 `loading="lazy"` 改为 `eager` + `fetchpriority="high"`，其余保持 `lazy` + `decoding="async"`，LCPDiscovery 检查通过。
+- **Element Plus 按需引入**：`vite.config.ts` 接入 `unplugin-vue-components` + `ElementPlusResolver`（`importStyle: 'css'`，生成 `src/components.d.ts`）；`main.ts` 移除全量 `ElementPlus` 注册、全量 CSS 与全量图标注册，只保留 `ElLoading` 指令及其样式，避免模板中 `el-*` 组件因未注册而失效。
+- **字体精简**：MiSans 从 4 个中文字重（Regular/Medium/Semibold/Bold，约 19.5MB）收敛为实际使用的 Regular(400) + Semibold(600)（约 9.7MB）；CSS 中 `500` 字重回落到 400/600。
+- **滚动细节**：`VirtualWaterfall.vue` 容器 resize 防抖 120ms、列宽/layout 防抖 80ms；`buffer` 从 1000 降为 600，减少常驻 DOM 数量；底部状态栏移除 `backdrop-filter`，避免滚动时重复合成。
+- **预览代理**：`vite.config.ts` 的 `preview` 增加 4173 端口 `/api` 代理，便于用生产构建做性能测量。
+
+| 指标 | 优化前 | 优化后 |
+|------|--------|--------|
+| 首屏 JS | 1,268.86 KB（gzip 410 KB） | 619.27 KB（gzip 212.8 KB） |
+| 首屏 CSS | 392.26 KB（gzip 55.6 KB） | 234.44 KB（gzip 34.7 KB） |
+| 字体 | 4 字重 ≈19.5 MB | 2 字重 ≈9.7 MB |
+| 首屏总传输（开发服务器） | 20.15 MB | 10.26 MB |
+| CLS | 0.184 | 0.00 |
+| LCP | 1,063 ms（开发模式） | 449 ms（生产预览：TTFB 4 / 加载延迟 324 / 加载 35 / 渲染 86 ms） |
+| 滚动 | 开发模式 34fps、长任务 110–142ms | 生产预览 111.2fps、0 长任务 |
+
+> 滚动数据差异主要来自 Vite 开发服务器与 Vue Inspector 开销；同一份代码在生产预览下无长任务。LCP 剩余主要成本是“加载延迟”（Vue 挂载后才发起缩略图请求），属客户端渲染固有开销。
+
 ## 10 万张规模的后续优化空间
 
 当前优化解决了“滚动 O(n)、追加 O(n²)、搜索请求风暴”这三类会随数据量放大的问题；已追加 FTS5 与 keyset 分页，缩略图支持后台预生成。但无限滚动仍会把已浏览页累积在内存中，10 万张全部滚完时内存与布局对象仍会增长。建议下一阶段按优先级推进：
 
 1. **窗口化数据源**：keyset 分页已实现（见 `search-pagination-thumbnails-搜索分页与缩略图优化.md`），但前端仍累积已加载页；真正的窗口化需要元数据级虚拟化或只保留视口附近页面。
 2. **响应式图片**：按列宽返回 300/600/1200 多档缩略图或 `srcset`，减少大图网格带宽。
-3. **前端代码拆分**：Element Plus 与 Lightbox 可按路由/交互动态导入，降低首屏 JS（当前构建仍有 >500KB chunk 警告）。
+3. **前端代码拆分**：已通过 Element Plus 按需引入把 JS 降到 619 KB，但构建仍有 >500KB chunk 警告；可继续对管理页、Lightbox、vue-cropper 等做路由级/交互级动态导入。
 4. **SQLite 维护**：定期 `ANALYZE` / `VACUUM`，并为高频筛选组合补充复合索引。
-5. **缩略图格式**：在 small/medium 之外评估 WebP/AVIF 与失败占位缓存。
+5. **缩略图格式**：生产预览追踪显示图片仍浪费约 130.6 kB（JPEG）；可在 small/medium 之外评估 WebP/AVIF 与失败占位缓存，并复核 133.6 kB 的缓存浪费来源。
 6. **真实数据压测**：在 10 万张库上验证搜索、深度滚动、首屏与缩略图预生成耗时。
 7. **图片读取鉴权**：`raw`/`thumbnail`/`download` 仍为公开接口，性能优化不改变该安全缺口。
 
 ## 验证
 
 - `npm run check`：通过。
-- `npm run build`：通过（仍有 Element Plus 大 chunk 警告，非本次引入）。
+- `npm run build`：通过；构建产物 `index-*.js` 619.27 KB（gzip 212.80 KB）、`index-*.css` 234.44 KB（gzip 34.70 KB），仍有 >500KB chunk 警告。
+- 生产预览性能（`vite preview` 4173，Chrome DevTools MCP）：LCP 449 ms、CLS 0.00；滚动 111.2 fps、无长任务；首屏总传输 10.26 MB（其中字体约 9.7 MB）。
 - 浏览器冒烟（http://localhost:5173）：
   - 首屏约 16 张卡片，总数 44；侧边栏/顶栏/瀑布流正常渲染；
   - 搜索 `wall` 结果更新、清空后恢复；

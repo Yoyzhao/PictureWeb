@@ -59,6 +59,10 @@
 - 动画只使用 `transform`/`opacity`；虚拟列表项不使用逐项入场动画或全量 `will-change`；必须支持 `prefers-reduced-motion`。
 - 大图网格使用 `medium` 缩略图，原图预加载需设置体积/数量上限；新增图片接口应返回缓存头。
 - 面向 10 万级数据的新功能，先评估是否会累积全部数据到前端内存；优先窗口化/游标分页方案。
+- 图片元素必须提供 `width`/`height` 或 `aspect-ratio` 预留尺寸；首屏前 15 张使用 `eager` + `fetchpriority="high"`，其余 `lazy` + `decoding="async"`。
+- Element Plus 组件必须按需引入（`unplugin-vue-components` + `ElementPlusResolver`，CSS 由解析器注入），禁止恢复 `app.use(ElementPlus)`、全量样式或全量图标注册；新增指令时单独引入对应样式（参考 `main.ts` 的 `ElLoading`）。
+- 字体只保留实际使用的字重（当前 MiSans Regular 400 + Semibold 600）；新增字重或字体文件前必须评估首屏传输体积。
+- 虚拟列表 `buffer` 保持 600 左右，新增滚动相关样式不得使用 `backdrop-filter` 等昂贵合成效果。
 
 ## 5.2 后端性能约定
 

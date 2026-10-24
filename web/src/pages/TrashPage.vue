@@ -114,6 +114,12 @@ const formatDate = (dateStr: string) => {
   const date = new Date(dateStr)
   return isNaN(date.getTime()) ? '-' : date.toLocaleString()
 }
+
+const imageAspectRatio = (img: any) => {
+  const width = Number(img.width) || 0
+  const height = Number(img.height) || 0
+  return width > 0 && height > 0 ? `${width} / ${height}` : '4 / 3'
+}
 </script>
 
 <template>
@@ -201,7 +207,7 @@ const formatDate = (dateStr: string) => {
           :items="trashItems" 
           :column-width="currentColumnWidth"
           :gap="16" 
-          :buffer="1000"
+          :buffer="600"
           :meta-height="trashMetaHeight"
         >
           <template #default="{ item: img }">
@@ -213,7 +219,16 @@ const formatDate = (dateStr: string) => {
               <div class="card-checkbox" @click.stop="toggleSelection(img.id)">
                   <el-checkbox :model-value="isSelected(img.id)"></el-checkbox>
               </div>
-              <img :src="`/api/images/trash/${img.id}/thumbnail?size=medium&token=${token}`" loading="lazy" decoding="async" :alt="img.file_name" :title="img.file_name" />
+              <img
+                :src="`/api/images/trash/${img.id}/thumbnail?size=medium&token=${token}`"
+                loading="lazy"
+                decoding="async"
+                :width="img.width || undefined"
+                :height="img.height || undefined"
+                :style="{ aspectRatio: imageAspectRatio(img) }"
+                :alt="img.file_name"
+                :title="img.file_name"
+              />
               <div class="card-overlay">
                   <div class="trash-actions">
                     <el-button 

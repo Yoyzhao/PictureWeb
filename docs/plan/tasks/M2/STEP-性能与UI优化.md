@@ -15,6 +15,7 @@
 | T-010 | UI 重构与性能优先动画 | 已完成 | main | 全局 token、侧边栏/顶栏/卡片/灯箱/回收站/管理页 |
 | T-011 | 后端 10 万级配套优化 | 已完成 | main | 索引、WAL、`per_page` 上限、图片缓存头、公开 settings 接口 |
 | T-012 | 验证与文档同步 | 已完成 | main | 类型检查、构建、浏览器冒烟、性能文档与进度 |
+| T-017 | 首屏指标与构建体积优化（第二轮） | 已完成 | main | aspect-ratio 消除 CLS、首屏图片优先级、Element Plus 按需引入、字体精简、滚动防抖与 buffer 调整 |
 
 ## 性能分析结论
 
@@ -60,12 +61,23 @@
 - 缩略图 `max-age=86400`，原图/下载 `max-age=3600`，启用条件请求。
 - 新增 `GET /api/settings`（公开，仅返回 HOTKEYS + ENABLE_PRELOAD），修复匿名 401 控制台错误。
 
+### T-017 首屏指标与构建体积优化（第二轮）
+
+- `ImageGrid.vue` / `TrashPage.vue` 的 `<img>` 补齐 `width`/`height`/`aspect-ratio`，消除缩略图未预留尺寸导致的 CLS（0.184 → 0.00）。
+- `VirtualWaterfall.vue` 透传 `index`；首屏前 15 张 `eager` + `fetchpriority=high`，LCPDiscovery 通过，LCP 生产预览 449 ms。
+- `vite.config.ts` 接入 `unplugin-vue-components` + `ElementPlusResolver`；`main.ts` 移除全量 Element Plus/样式/图标注册，仅保留 `ElLoading` 指令；JS 1,268.86 → 619.27 KB（gzip 212.8 KB），CSS 392.26 → 234.44 KB（gzip 34.7 KB）。
+- MiSans 由 4 字重（约 19.5MB）精简为 Regular(400) + Semibold(600)（约 9.7MB），首屏总传输 20.15 → 10.26 MB。
+- 容器 resize 120ms、列宽/layout 80ms 防抖；`buffer` 1000 → 600；状态栏移除 `backdrop-filter`；预览模式增加 4173 `/api` 代理。
+- 生产预览实测：滚动 111.2 fps、0 长任务；LCP 449 ms、CLS 0.00。
+
 ## 验证汇总
 
 | 验证项 | 方法 | 结果 |
 |--------|------|------|
 | 前端类型检查 | `npm run check` | 通过 |
-| 前端构建 | `npm run build` | 通过（仍有 Element Plus 大 chunk 警告，非本次引入） |
+| 前端构建 | `npm run build` | 通过；JS 619.27 KB（gzip 212.8 KB）、CSS 234.44 KB（gzip 34.7 KB） |
+| 首屏指标（生产预览） | Chrome DevTools MCP trace | LCP 449 ms、CLS 0.00 |
+| 滚动（生产预览） | DevTools 帧率与长任务 | 111.2 fps、0 长任务 |
 | 浏览器冒烟 | Chrome 浏览器自动化 | 首屏约 16 张卡片/总数 44；搜索、Lightbox、主题切换、滚动加载、侧边栏折叠均通过；控制台无 error |
 | 分页上限 | `GET /api/images?per_page=1000` | 返回 `per_page=200` |
 | 图片缓存 | thumbnail / raw 响应头 | `public, max-age=86400` / `public, max-age=3600` |
@@ -76,6 +88,6 @@
 ## 遗留与后续
 
 1. 未在 10 万张真实数据上做端到端压测；当前结论基于代码复杂度与 23,851 行测试库实测。
-2. 后续建议：窗口化数据源/keyset 分页、FTS5 trigram 搜索、缩略图预生成队列、响应式图片、前端代码拆分。
+2. 后续建议：窗口化数据源、响应式图片/WebP 缩略图、管理页/Lightbox/裁剪器动态导入（Element Plus 已按需引入）、10 万真实数据压测。
 3. 图片读取接口仍未做服务端鉴权（历史缺口）。
 4. 生产更新按用户要求暂缓至开发完成后统一执行。

@@ -173,6 +173,13 @@ const formatDate = (value: any) => {
   return isNaN(date.getTime()) ? '-' : date.toLocaleDateString()
 }
 
+// Reserve the image box before the thumbnail finishes decoding to avoid CLS.
+const imageAspectRatio = (img: any) => {
+  const width = Number(img.width) || 0
+  const height = Number(img.height) || 0
+  return width > 0 && height > 0 ? `${width} / ${height}` : '4 / 3'
+}
+
 const toggleFavorite = (img: any) => {
   imageStore.toggleFavorite(img)
 }
@@ -227,11 +234,11 @@ const toggleSelection = (id: number) => {
         :items-version="imagesVersion"
         :column-width="currentColumnWidth"
         :gap="16" 
-        :buffer="1000"
+        :buffer="600"
         :meta-height="metaHeight"
         @load-more="imageStore.fetchImages()"
       >
-      <template #default="{ item: img }">
+      <template #default="{ item: img, index }">
         <div 
           class="img-card"
           :class="{ selected: isSelected(img.id) }"
@@ -240,7 +247,17 @@ const toggleSelection = (id: number) => {
           <div class="card-checkbox" @click.stop="toggleSelection(img.id)">
               <el-checkbox :model-value="isSelected(img.id)" :aria-label="`选择 ${img.file_name}`"></el-checkbox>
           </div>
-          <img :src="getThumbnailUrl(img.id)" loading="lazy" decoding="async" :alt="img.file_name" :title="img.file_name" />
+          <img
+            :src="getThumbnailUrl(img.id)"
+            :loading="index < 15 ? 'eager' : 'lazy'"
+            :fetchpriority="index < 15 ? 'high' : 'auto'"
+            decoding="async"
+            :width="img.width || undefined"
+            :height="img.height || undefined"
+            :style="{ aspectRatio: imageAspectRatio(img) }"
+            :alt="img.file_name"
+            :title="img.file_name"
+          />
           <div class="card-overlay">
               <button v-if="isLoggedIn && !isGuest" class="action-btn fav-btn" :class="{ active: img.is_favorite }" :aria-label="img.is_favorite ? '取消收藏' : '收藏'" @click.stop="toggleFavorite(img)">
                   <el-icon><Star /></el-icon>
@@ -673,8 +690,7 @@ const toggleSelection = (id: number) => {
     left: var(--current-sidebar-width, var(--sidebar-width));
     right: 0;
     height: var(--status-bar-height);
-    background: var(--bg-topbar);
-    backdrop-filter: blur(14px);
+    background: var(--bg-sidebar);
     border-top: 1px solid var(--border-color);
     padding: 0 24px;
     display: flex;

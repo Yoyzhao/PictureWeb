@@ -50,6 +50,7 @@ interface LayoutItem {
   left: number
   width: number
   height: number
+  index: number
   item: T
 }
 
@@ -107,6 +108,7 @@ const calculateLayout = (isAppend = false) => {
       left: colIndex * (width + gapValue),
       width,
       height: itemHeight,
+      index: i,
       item
     })
 
@@ -176,6 +178,8 @@ const maybeLoadMore = () => {
 }
 
 let scrollRaf = 0
+let resizeTimer = 0
+let layoutTimer = 0
 let pendingScrollTop = 0
 let pendingViewportHeight = 0
 
@@ -206,7 +210,20 @@ const syncViewport = () => {
 
 const handleResize = () => {
   syncViewport()
-  calculateLayout()
+  // Coalesce resize bursts; a full relayout of a very large loaded list is expensive.
+  if (resizeTimer) clearTimeout(resizeTimer)
+  resizeTimer = window.setTimeout(() => {
+    resizeTimer = 0
+    calculateLayout()
+  }, 120)
+}
+
+const scheduleLayout = () => {
+  if (layoutTimer) clearTimeout(layoutTimer)
+  layoutTimer = window.setTimeout(() => {
+    layoutTimer = 0
+    calculateLayout()
+  }, 80)
 }
 
 let lastItems: T[] | null = null
@@ -240,10 +257,12 @@ onUnmounted(() => {
   scrollContainerRef.value?.removeEventListener('scroll', handleScroll)
   window.removeEventListener('resize', handleResize)
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
+  if (resizeTimer) clearTimeout(resizeTimer)
+  if (layoutTimer) clearTimeout(layoutTimer)
 })
 
 watch([containerWidth, columnsCount, () => props.columnWidth, () => props.metaHeight], () => {
-  calculateLayout()
+  scheduleLayout()
 })
 
 watch([() => props.items, () => props.items.length, () => props.itemsVersion], ([items, length]) => {
@@ -271,7 +290,7 @@ watch([() => props.items, () => props.items.length, () => props.itemsVersion], (
         height: item.height + 'px'
       }"
     >
-      <slot :item="item.item"></slot>
+      <slot :item="item.item" :index="item.index"></slot>
     </div>
   </div>
 </template>
