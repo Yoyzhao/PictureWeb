@@ -303,6 +303,7 @@ watch([() => props.items, () => props.items.length, () => props.itemsVersion], (
 
 .virtual-waterfall-item {
   position: absolute;
-  contain: layout paint style;
+  /* 不使用 paint containment：否则卡片 hover 抬升与外侧阴影/描边会被裁掉 */
+  contain: layout style;
 }
 </style>

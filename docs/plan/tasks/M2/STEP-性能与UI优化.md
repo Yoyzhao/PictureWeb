@@ -3,7 +3,7 @@
 - **里程碑**：M2 前端性能与 UI 优化
 - **阶段**：前端渲染性能 + 后端配套 + UI 重构（5C/5D 垂直切片）
 - **状态**：已完成，待用户验收
-- **关联 CHG**：`CHG-20261024-02`、`CHG-20261024-04`、`CHG-20261024-05`（`docs/tech/功能变更.md`）
+- **关联 CHG**：`CHG-20261024-02`、`CHG-20261024-04`、`CHG-20261024-05`、`CHG-20261024-06`（`docs/tech/功能变更.md`）
 - **更新日期**：2026-10-24
 
 ## 任务索引
@@ -17,6 +17,7 @@
 | T-012 | 验证与文档同步 | 已完成 | main | 类型检查、构建、浏览器冒烟、性能文档与进度 |
 | T-017 | 首屏指标与构建体积优化（第二轮） | 已完成 | main | aspect-ratio 消除 CLS、首屏图片优先级、Element Plus 按需引入、字体精简、滚动防抖与 buffer 调整 |
 | T-018 | 按需加载与缩略图 WebP 化（第三轮） | 已完成 | main | Admin/Trash/Lightbox 异步加载、WebP 缩略图、存量迁移开关、回收站缩略图修复 |
+| T-019 | 图片卡片悬停与选中态修复 | 已完成 | main | 移除 item paint containment、hover 抬升+阴影+微放大、选中 2px 外环 |
 
 ## 性能分析结论
 
@@ -81,6 +82,13 @@
 - 回收站缩略图改用 `generate_thumbnail_from_path` 缓存到 `cache/trash/<size>/<id>.webp`，修复此前把文件路径当作 image_id 导致回退原图的问题；回收站网格按列宽请求 small/medium，恢复/永久删除时清理缓存。
 - 缩略图 `size` 参数收敛为 `small`/`medium` 白名单，避免任意值拼接缓存路径。
 
+### T-019 图片卡片悬停与选中态修复
+
+- `VirtualWaterfall.vue` 的 `.virtual-waterfall-item` 从 `contain: layout paint style` 改为 `contain: layout style`，避免 hover 抬升与外侧阴影/描边被 paint containment 裁切。
+- `ImageGrid.vue`：hover 去掉 1px 主色边框，改为抬升 2px + `--shadow-md` + 图片 `scale(1.02)`；选中态改为 `0 0 0 2px var(--primary), var(--shadow-sm)`，并补充选中+hover 的阴影组合。
+- `TrashPage.vue` 同步相同方案，回收站卡片 hover 与选中表现一致。
+- 验证：浏览器截图确认 hover 四周完整、无蓝边，选中 2px 环上下左右可见，控制台无 error；滚动 109.5 fps、0 长帧。
+
 ## 验证汇总
 
 | 验证项 | 方法 | 结果 |
@@ -94,6 +102,8 @@
 | 缩略图格式 | 同图 JPEG/WebP 对比 | 300px 减少 22.7%，800px 减少 31.2% |
 | 回收站缩略图 | `generate_thumbnail_from_path` | webp 生成与清理通过 |
 | 缩略图参数 | `?size=../../evil` | 回退 small，未产生越界目录 |
+| 卡片 hover/选中 | 浏览器截图 | 无顶部裁切与 1px 蓝边；2px 选中环四周完整 |
+| 滚动性能（修复后） | DevTools 滚动采样 | 109.5 fps、0 长帧 |
 | 浏览器冒烟 | Chrome 浏览器自动化 | 首屏约 16 张卡片/总数 44；搜索、Lightbox、主题切换、滚动加载、侧边栏折叠均通过；控制台无 error |
 | 分页上限 | `GET /api/images?per_page=1000` | 返回 `per_page=200` |
 | 图片缓存 | thumbnail / raw 响应头 | `public, max-age=86400` / `public, max-age=3600` |

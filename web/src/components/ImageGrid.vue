@@ -451,7 +451,7 @@ const toggleSelection = (id: number) => {
 
 .img-card.selected {
     border-color: var(--primary);
-    box-shadow: 0 0 0 2px var(--primary);
+    box-shadow: 0 0 0 2px var(--primary), var(--shadow-sm);
 }
 
 .card-checkbox {
@@ -543,9 +543,16 @@ const toggleSelection = (id: number) => {
 
 @media (hover: hover) {
     .img-card:hover {
-        transform: translateY(-3px);
-        border-color: var(--primary);
+        transform: translateY(-2px);
         box-shadow: var(--shadow-md);
+    }
+
+    .img-card:hover img {
+        transform: scale(1.02);
+    }
+
+    .img-card.selected:hover {
+        box-shadow: 0 0 0 2px var(--primary), var(--shadow-md);
     }
 }
 
@@ -555,6 +562,7 @@ const toggleSelection = (id: number) => {
     display: block;
     background: var(--bg-secondary);
     flex: 0 0 auto;
+    transition: transform var(--motion-base) var(--ease-out);
 }
 
 .img-info {
