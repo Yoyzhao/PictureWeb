@@ -1,7 +1,7 @@
 # 前端渲染性能与 UI 优化
 
 - **状态**：活跃
-- **关联 CHG/任务**：`CHG-20261024-02`、`CHG-20261024-04` / T-008 ~ T-012、T-017
+- **关联 CHG/任务**：`CHG-20261024-02`、`CHG-20261024-04`、`CHG-20261024-05` / T-008 ~ T-012、T-017、T-018
 - **所属里程碑**：M2 前端性能与 UI 优化
 - **最后更新**：2026-10-24
 
@@ -117,23 +117,39 @@
 
 > 滚动数据差异主要来自 Vite 开发服务器与 Vue Inspector 开销；同一份代码在生产预览下无长任务。LCP 剩余主要成本是“加载延迟”（Vue 挂载后才发起缩略图请求），属客户端渲染固有开销。
 
+### 第三轮：按需加载与缩略图 WebP 化（2026-10-24 下午）
+
+- **二级视图按需加载**：`HomePage.vue` 用 `defineAsyncComponent` 加载 `AdminPage`、`TrashPage`、`Lightbox`。首屏 JS 619.27 → **467.54 KB**（gzip 212.8 → 164.85 KB），首屏 CSS 234.44 → **128.16 KB**（gzip 34.7 → 20.67 KB）；管理页 67.01 KB、表格 77.54 KB、灯箱 8.67 KB、回收站 5.81 KB 均拆为独立 chunk。浏览器验证初始加载不含 `Lightbox-*.js`，点击图片后才请求且返回 200。
+- **缩略图 WebP**：新增 `THUMBNAIL_FORMAT`（默认 `webp`）。读取时优先当前格式、回退存量 jpg；写入使用 `quality=90, method=4`；DB 记录改为 upsert，迁移后删除旧 jpg 避免双份缓存。同图对比：300px 体积减少 **22.7%**，800px 减少 **31.2%**。
+- **存量迁移**：`generate_thumbnail(..., force=True)` 与 `prebuild_thumbnails.py --rebuild` 支持分批迁移；本地迁移 200 张后 jpg 422→235、webp 2→202。
+- **回收站缩略图修复**：此前 `generate_thumbnail(trash_path, size)` 把文件路径当作 image_id，查询失败后回退原图。新增 `generate_thumbnail_from_path` 缓存到 `cache/trash/<size>/`，恢复/永久删除时清理；回收站网格按列宽请求 small/medium，不再固定 medium。
+- **首屏指标**：分包后生产预览 trace 为 LCP **402 ms**（最佳一次）、CLS 0.00；多次测量在 402–696 ms 间波动，主要受本机缩略图按需生成与后台任务影响。
+
+| 指标 | 第二轮 | 第三轮 |
+|------|--------|--------|
+| 首屏 JS | 619.27 KB（gzip 212.8 KB） | 467.54 KB（gzip 164.85 KB） |
+| 首屏 CSS | 234.44 KB（gzip 34.7 KB） | 128.16 KB（gzip 20.67 KB） |
+| 按需 chunk | 无 | AdminPage 67.01 / el-table 77.54 / Lightbox 8.67 / TrashPage 5.81 KB |
+| 缩略图格式 | JPEG q90 | WebP q90（300px -22.7%，800px -31.2%） |
+
 ## 10 万张规模的后续优化空间
 
 当前优化解决了“滚动 O(n)、追加 O(n²)、搜索请求风暴”这三类会随数据量放大的问题；已追加 FTS5 与 keyset 分页，缩略图支持后台预生成。但无限滚动仍会把已浏览页累积在内存中，10 万张全部滚完时内存与布局对象仍会增长。建议下一阶段按优先级推进：
 
 1. **窗口化数据源**：keyset 分页已实现（见 `search-pagination-thumbnails-搜索分页与缩略图优化.md`），但前端仍累积已加载页；真正的窗口化需要元数据级虚拟化或只保留视口附近页面。
 2. **响应式图片**：按列宽返回 300/600/1200 多档缩略图或 `srcset`，减少大图网格带宽。
-3. **前端代码拆分**：已通过 Element Plus 按需引入把 JS 降到 619 KB，但构建仍有 >500KB chunk 警告；可继续对管理页、Lightbox、vue-cropper 等做路由级/交互级动态导入。
+3. **前端代码拆分**：已完成 Element Plus 按需引入与管理页/回收站/灯箱异步加载，首屏 JS 467.54 KB；可继续评估 `vue-cropper` 等未使用依赖清理与路由级分包。
 4. **SQLite 维护**：定期 `ANALYZE` / `VACUUM`，并为高频筛选组合补充复合索引。
-5. **缩略图格式**：生产预览追踪显示图片仍浪费约 130.6 kB（JPEG）；可在 small/medium 之外评估 WebP/AVIF 与失败占位缓存，并复核 133.6 kB 的缓存浪费来源。
+5. **缩略图格式**：已支持 WebP 与 `--rebuild` 迁移；剩余工作是按批迁移存量 jpg 缓存，并复核 133.6 kB 的缓存浪费来源。
 6. **真实数据压测**：在 10 万张库上验证搜索、深度滚动、首屏与缩略图预生成耗时。
 7. **图片读取鉴权**：`raw`/`thumbnail`/`download` 仍为公开接口，性能优化不改变该安全缺口。
 
 ## 验证
 
 - `npm run check`：通过。
-- `npm run build`：通过；构建产物 `index-*.js` 619.27 KB（gzip 212.80 KB）、`index-*.css` 234.44 KB（gzip 34.70 KB），仍有 >500KB chunk 警告。
-- 生产预览性能（`vite preview` 4173，Chrome DevTools MCP）：LCP 449 ms、CLS 0.00；滚动 111.2 fps、无长任务；首屏总传输 10.26 MB（其中字体约 9.7 MB）。
+- `npm run build`：通过；第三轮分包后首屏 `index-*.js` 467.54 KB（gzip 164.85 KB）、`index-*.css` 128.16 KB（gzip 20.67 KB），AdminPage/el-table-column/Lightbox/TrashPage 为独立 chunk，无 >500KB 警告。
+- 生产预览性能（`vite preview` 4173，Chrome DevTools MCP）：LCP 402–696 ms（多次测量波动）、CLS 0.00；滚动 111.2 fps、无长任务；首屏总传输 10.26 MB（其中字体约 9.7 MB）。
+- 按需加载（浏览器网络请求）：初始加载不含 `Lightbox-*.js`，点击图片后请求并返回 200；灯箱打开/关闭正常。
 - 浏览器冒烟（http://localhost:5173）：
   - 首屏约 16 张卡片，总数 44；侧边栏/顶栏/瀑布流正常渲染；
   - 搜索 `wall` 结果更新、清空后恢复；

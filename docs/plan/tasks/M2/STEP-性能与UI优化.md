@@ -3,7 +3,7 @@
 - **里程碑**：M2 前端性能与 UI 优化
 - **阶段**：前端渲染性能 + 后端配套 + UI 重构（5C/5D 垂直切片）
 - **状态**：已完成，待用户验收
-- **关联 CHG**：`CHG-20261024-02`（`docs/tech/功能变更.md`）
+- **关联 CHG**：`CHG-20261024-02`、`CHG-20261024-04`、`CHG-20261024-05`（`docs/tech/功能变更.md`）
 - **更新日期**：2026-10-24
 
 ## 任务索引
@@ -16,6 +16,7 @@
 | T-011 | 后端 10 万级配套优化 | 已完成 | main | 索引、WAL、`per_page` 上限、图片缓存头、公开 settings 接口 |
 | T-012 | 验证与文档同步 | 已完成 | main | 类型检查、构建、浏览器冒烟、性能文档与进度 |
 | T-017 | 首屏指标与构建体积优化（第二轮） | 已完成 | main | aspect-ratio 消除 CLS、首屏图片优先级、Element Plus 按需引入、字体精简、滚动防抖与 buffer 调整 |
+| T-018 | 按需加载与缩略图 WebP 化（第三轮） | 已完成 | main | Admin/Trash/Lightbox 异步加载、WebP 缩略图、存量迁移开关、回收站缩略图修复 |
 
 ## 性能分析结论
 
@@ -70,14 +71,29 @@
 - 容器 resize 120ms、列宽/layout 80ms 防抖；`buffer` 1000 → 600；状态栏移除 `backdrop-filter`；预览模式增加 4173 `/api` 代理。
 - 生产预览实测：滚动 111.2 fps、0 长任务；LCP 449 ms、CLS 0.00。
 
+### T-018 按需加载与缩略图 WebP 化（第三轮）
+
+- `HomePage.vue` 使用 `defineAsyncComponent` 加载 `AdminPage` / `TrashPage` / `Lightbox`；首屏 JS 619.27 → 467.54 KB（gzip 164.85 KB），首屏 CSS 234.44 → 128.16 KB（gzip 20.67 KB）；管理页、表格、灯箱、回收站均生成独立 chunk。
+- 浏览器验证：初始加载无 `Lightbox-*.js`，点击图片后按需请求且状态 200；CLS 0.00，灯箱可正常打开/关闭。
+- 缩略图服务新增 `THUMBNAIL_FORMAT`（默认 `webp`），读取优先当前格式、回退存量 jpg；写入使用 WebP `method=4`，DB 记录改为 upsert。
+- `generate_thumbnail(..., force=True)` 与 `prebuild_thumbnails.py --rebuild` 支持存量格式迁移，迁移后删除旧 jpg，避免双份缓存；本地迁移 200 张验证通过（jpg 422→235、webp 2→202）。
+- 同图对比（quality=90）：300px WebP 比 JPEG 小 22.7%，800px 小 31.2%。
+- 回收站缩略图改用 `generate_thumbnail_from_path` 缓存到 `cache/trash/<size>/<id>.webp`，修复此前把文件路径当作 image_id 导致回退原图的问题；回收站网格按列宽请求 small/medium，恢复/永久删除时清理缓存。
+- 缩略图 `size` 参数收敛为 `small`/`medium` 白名单，避免任意值拼接缓存路径。
+
 ## 验证汇总
 
 | 验证项 | 方法 | 结果 |
 |--------|------|------|
 | 前端类型检查 | `npm run check` | 通过 |
-| 前端构建 | `npm run build` | 通过；JS 619.27 KB（gzip 212.8 KB）、CSS 234.44 KB（gzip 34.7 KB） |
-| 首屏指标（生产预览） | Chrome DevTools MCP trace | LCP 449 ms、CLS 0.00 |
+| 前端构建 | `npm run build` | 通过（第二轮 619.27 KB；第三轮分包后见下方） |
+| 首屏指标（生产预览） | Chrome DevTools MCP trace | LCP 402–696 ms（多次测量波动）、CLS 0.00 |
 | 滚动（生产预览） | DevTools 帧率与长任务 | 111.2 fps、0 长任务 |
+| 首屏分包 | `npm run build` | 初始 JS 467.54 KB（gzip 164.85 KB）；Admin/表格/Lightbox/Trash 独立 chunk |
+| 按需加载 | 浏览器网络请求 | 初始无 Lightbox chunk；点击图片后加载 200 |
+| 缩略图格式 | 同图 JPEG/WebP 对比 | 300px 减少 22.7%，800px 减少 31.2% |
+| 回收站缩略图 | `generate_thumbnail_from_path` | webp 生成与清理通过 |
+| 缩略图参数 | `?size=../../evil` | 回退 small，未产生越界目录 |
 | 浏览器冒烟 | Chrome 浏览器自动化 | 首屏约 16 张卡片/总数 44；搜索、Lightbox、主题切换、滚动加载、侧边栏折叠均通过；控制台无 error |
 | 分页上限 | `GET /api/images?per_page=1000` | 返回 `per_page=200` |
 | 图片缓存 | thumbnail / raw 响应头 | `public, max-age=86400` / `public, max-age=3600` |

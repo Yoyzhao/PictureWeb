@@ -17,6 +17,7 @@ def main():
     parser.add_argument('--folder', type=int, default=None, help='Only prebuild one folder id')
     parser.add_argument('--limit', type=int, default=None, help='Maximum number of images to process')
     parser.add_argument('--size', choices=['small', 'medium'], default='small', help='Thumbnail size type')
+    parser.add_argument('--rebuild', action='store_true', help='Regenerate existing thumbnails (format migration)')
     args = parser.parse_args()
 
     app = create_app()
@@ -24,7 +25,8 @@ def main():
         processed = prebuild_thumbnails(
             folder_id=args.folder,
             limit=args.limit,
-            size_type=args.size
+            size_type=args.size,
+            force=args.rebuild
         )
 
     print(f"Thumbnail prebuild finished: {processed} images attempted.")

@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, send_file, abort, g, current_app
 from app.utils.db import get_db
-from app.services.thumbnail import generate_thumbnail
+from app.services.thumbnail import generate_thumbnail, generate_thumbnail_from_path, clear_trash_thumbnails
 from app.routes.auth import get_current_user, login_required
 from datetime import datetime
 import base64
@@ -208,11 +208,13 @@ def batch_delete_images():
             thumbnails = db.execute("SELECT file_path FROM thumbnails WHERE image_id = ?", (img_id,)).fetchall()
             for thumb in thumbnails:
                 thumb_path = os.path.normpath(thumb['file_path'])
-                if os.path.exists(thumb_path):
-                    try:
-                        os.remove(thumb_path)
-                    except:
-                        pass
+                base_path = os.path.splitext(thumb_path)[0]
+                for candidate in (base_path + '.webp', base_path + '.jpg'):
+                    if os.path.exists(candidate):
+                        try:
+                            os.remove(candidate)
+                        except Exception:
+                            pass
             # Database record deletion is handled by cascade (if configured) 
             # or we already deleted the image which should cascade.
             # But let's be explicit if not sure.
@@ -276,7 +278,9 @@ def get_trash_thumbnail(id):
     # Generate thumbnail from the file in trash
     size = request.args.get('size', 'medium')
     try:
-        thumb_path = generate_thumbnail(trash_item['trash_path'], size)
+        thumb_path = generate_thumbnail_from_path(trash_item['trash_path'], id, size)
+        if not thumb_path:
+            raise FileNotFoundError('thumbnail generation failed')
         return send_file(thumb_path, max_age=3600, conditional=True)
     except Exception as e:
         current_app.logger.error(f"Thumbnail generation failed for trash item {id}: {e}")
@@ -357,6 +361,7 @@ def restore_trash_images():
                         db.execute("INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)", (new_image_id, tag_id))
                 
                 db.execute("DELETE FROM trash WHERE id = ?", (t_id,))
+                clear_trash_thumbnails(t_id)
                 success_count += 1
             else:
                 errors.append(f"Trash file not found: {trash_path}")
@@ -400,6 +405,7 @@ def clear_trash_images():
             if os.path.exists(trash_path):
                 os.remove(trash_path)
             db.execute("DELETE FROM trash WHERE id = ?", (item['id'],))
+            clear_trash_thumbnails(item['id'])
             success_count += 1
         except Exception as e:
             errors.append(f"Failed to permanently delete {item['file_name']}: {str(e)}")

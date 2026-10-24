@@ -2,14 +2,16 @@
 import Sidebar from '@/components/Sidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import ImageGrid from '@/components/ImageGrid.vue'
-import AdminPage from '@/pages/AdminPage.vue'
-import TrashPage from '@/pages/TrashPage.vue'
-import Lightbox from '@/components/Lightbox.vue'
-import { ref, computed, onMounted } from 'vue'
+import { defineAsyncComponent, ref, computed, onMounted } from 'vue'
 import { useImageStore } from '@/stores/image'
 import { useHotkeyStore } from '@/stores/hotkey'
 import { useUIStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
+
+// 管理页、回收站与灯箱按需加载，避免进入首屏包
+const AdminPage = defineAsyncComponent(() => import('@/pages/AdminPage.vue'))
+const TrashPage = defineAsyncComponent(() => import('@/pages/TrashPage.vue'))
+const Lightbox = defineAsyncComponent(() => import('@/components/Lightbox.vue'))
 
 const imageStore = useImageStore()
 const hotkeyStore = useHotkeyStore()

@@ -25,6 +25,7 @@ const currentColumnWidth = computed(() => columnWidthMap[gridSize.value])
 const isSelected = (id: number) => selectedTrashSet.value.has(id)
 const selectedTrashSet = computed(() => new Set(selectedTrashIds.value))
 const trashMetaHeight = computed(() => gridSize.value === 'small' ? 0 : 56)
+const trashThumbnailSize = computed(() => gridSize.value === 'large' ? 'medium' : 'small')
 
 const toggleSelection = (id: number) => {
   const index = selectedTrashIds.value.indexOf(id)
@@ -220,7 +221,7 @@ const imageAspectRatio = (img: any) => {
                   <el-checkbox :model-value="isSelected(img.id)"></el-checkbox>
               </div>
               <img
-                :src="`/api/images/trash/${img.id}/thumbnail?size=medium&token=${token}`"
+                :src="`/api/images/trash/${img.id}/thumbnail?size=${trashThumbnailSize}&token=${token}`"
                 loading="lazy"
                 decoding="async"
                 :width="img.width || undefined"

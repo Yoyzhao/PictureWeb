@@ -61,6 +61,7 @@
 - 面向 10 万级数据的新功能，先评估是否会累积全部数据到前端内存；优先窗口化/游标分页方案。
 - 图片元素必须提供 `width`/`height` 或 `aspect-ratio` 预留尺寸；首屏前 15 张使用 `eager` + `fetchpriority="high"`，其余 `lazy` + `decoding="async"`。
 - Element Plus 组件必须按需引入（`unplugin-vue-components` + `ElementPlusResolver`，CSS 由解析器注入），禁止恢复 `app.use(ElementPlus)`、全量样式或全量图标注册；新增指令时单独引入对应样式（参考 `main.ts` 的 `ElLoading`）。
+- 管理页、回收站、灯箱必须通过 `defineAsyncComponent` 按需加载，禁止静态 import 进首页包；新增二级视图沿用该约定。
 - 字体只保留实际使用的字重（当前 MiSans Regular 400 + Semibold 600）；新增字重或字体文件前必须评估首屏传输体积。
 - 虚拟列表 `buffer` 保持 600 左右，新增滚动相关样式不得使用 `backdrop-filter` 等昂贵合成效果。
 
@@ -70,6 +71,9 @@
 - 列表分页后续请求必须使用 `cursor`/`next_cursor`，禁止新增深层 `OFFSET`；游标必须绑定排序并在不匹配时返回 400。
 - 新增排序字段时必须同时提供对应索引与 keyset 比较逻辑，并用 `id` 作为 tie-breaker。
 - 缩略图预生成受 `THUMBNAIL_PREGENERATE` 控制；全库补齐使用 `scripts/sql-script/prebuild_thumbnails.py` 分批执行，禁止在请求线程内全库同步生成。
+- 缩略图格式由 `THUMBNAIL_FORMAT` 控制（默认 `webp`）；读取时必须兼容存量 jpg 缓存，格式迁移使用 `prebuild_thumbnails.py --rebuild` 分批执行，禁止直接删除旧缓存。
+- 回收站缩略图必须使用 `generate_thumbnail_from_path` 缓存到 `cache/trash/<size>/`，禁止把文件路径当作 image_id 传入 `generate_thumbnail`。
+- 缩略图 `size` 参数必须限制为 `small`/`medium`（服务层已做白名单），禁止直接拼接进缓存路径。
 - 修改 `images.file_name` 或删除图片时必须保证 FTS 触发器同步；批量导入绕过触发器时执行 `--rebuild-search-index`。
 
 ## 6. 特殊流程与禁忌

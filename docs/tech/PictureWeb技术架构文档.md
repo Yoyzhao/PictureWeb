@@ -566,12 +566,14 @@ PicGallery/
 - 灯箱原图预加载增加 6MB 体积门槛与 120 条 URL 上限，切换时清理定时器；滚轮缩放按帧合并。
 - 动效仅使用 `transform/opacity`，虚拟列表不使用 `transition-group` 与全量 `will-change`，并支持 `prefers-reduced-motion`。
 - 列表分页使用服务端 `next_cursor` 游标；前端保留 `nextCursor`，服务端返回 null 时停止加载。
-- 后续：窗口化数据源、响应式图片（srcset/WebP）、Element Plus 与 Lightbox 代码拆分。
+- 后续：窗口化数据源、响应式 `srcset` 多档缩略图；Element Plus 已按需引入，管理页/回收站/灯箱已按需加载。
 
 ### 10.3 后端与图片处理优化
 
 - 缩略图按需生成并落盘缓存；缩略图记录写入 `thumbnails` 表。
+- 默认输出 WebP（`THUMBNAIL_FORMAT`），读取兼容存量 jpg；格式迁移使用 `prebuild_thumbnails.py --rebuild`，成功后删除旧格式文件。
+- 回收站缩略图由 `generate_thumbnail_from_path` 缓存到 `cache/trash/<size>/`，恢复/永久删除时同步清理。
 - 扫描完成且状态置为 `completed` 后，后台线程按 id 分批预生成缺失的 `small` 缩略图；`THUMBNAIL_PREGENERATE` 控制开关，全局锁避免并发预生成。
 - 历史库可用 `scripts/sql-script/prebuild_thumbnails.py --limit/--folder` 分批补齐。
 - 扫描任务使用后台线程，进度每 10 个文件更新一次；100k 规模可进一步改为批量提交。
-- 10 万张规模的后续重点：窗口化数据源、WebP/AVIF、受限并发与失败占位缓存、真实数据压测。
+- 10 万张规模的后续重点：窗口化数据源、AVIF/多档响应式缩略图、受限并发与失败占位缓存、真实数据压测。

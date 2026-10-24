@@ -130,7 +130,8 @@
 | `TRASH_DIR` | 应用内回收站目录 | `config.yaml` | 否 |
 | `LOG_LEVEL` | 日志级别 | `config.yaml` | 否 |
 | `ANONYMOUS_ACCESS` | 是否允许匿名访问公开文件夹 | `config.yaml` | 否 |
-| `THUMBNAIL_QUALITY` | 缩略图 JPEG 质量 | `config.yaml` | 否 |
+| `THUMBNAIL_FORMAT` | 缩略图输出格式（`webp`/`jpeg`），存量 jpg 缓存仍可读取 | `config.yaml` | 否 |
+| `THUMBNAIL_QUALITY` | 缩略图质量 | `config.yaml` | 否 |
 | `THUMBNAIL_PREGENERATE` | 扫描完成后是否后台预生成小尺寸缩略图 | `config.yaml` | 否 |
 | `SCAN_RECURSIVE` | 是否递归扫描 | `config.yaml` | 否 |
 | `SCAN_EXTENSIONS` | 扫描的图片后缀 | `config.yaml` | 否 |
