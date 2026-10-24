@@ -1,5 +1,6 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { ref, shallowRef, watch } from 'vue'
+import { ref, shallowRef, watch, triggerRef } from 'vue'
+import { watchDebounced } from '@vueuse/core'
 import { 
   getImages, 
   updateImage, 
@@ -29,6 +30,7 @@ export interface Image {
 
 export const useImageStore = defineStore('image', () => {
   const images = shallowRef<Image[]>([])
+  const imagesVersion = ref(0)
   const total = ref(0)
   const page = ref(1)
   const perPage = ref(50)
@@ -41,6 +43,11 @@ export const useImageStore = defineStore('image', () => {
   const searchQuery = ref('')
   const selectedImageIds = ref<number[]>([])
   const gridSize = ref<'small' | 'medium' | 'large'>('medium')
+
+  // Request coordination: abort stale requests and ignore out-of-order responses.
+  let activeController: AbortController | null = null
+  let requestSeq = 0
+  const loadedIds = new Set<number>()
   
   const folderStore = useFolderStore()
   const authStore = useAuthStore()
@@ -48,13 +55,24 @@ export const useImageStore = defineStore('image', () => {
   const { user, token } = storeToRefs(authStore)
 
   const fetchImages = async (reset = false) => {
-    if (loading.value || showAdminView.value) return
-    loading.value = true
-    
+    if (showAdminView.value) return
+    if (!reset && images.value.length >= total.value) return
+    if (loading.value && !reset) return
+
     if (reset) {
+      activeController?.abort()
       page.value = 1
       images.value = []
+      imagesVersion.value++
+      total.value = 0
+      loadedIds.clear()
+      selectedImageIds.value = []
     }
+
+    const seq = ++requestSeq
+    const controller = new AbortController()
+    activeController = controller
+    loading.value = true
 
     try {
       const res = await getImages({
@@ -65,33 +83,53 @@ export const useImageStore = defineStore('image', () => {
         sort_by: sortBy.value,
         sort_order: sortOrder.value,
         q: searchQuery.value || undefined
-      })
-      
-      // Transform is_favorite to boolean if it comes as 0/1 from backend
-      const data = res.data.data.map((img: any) => ({
-        ...img,
-        is_favorite: !!img.is_favorite
-      }))
+      }, controller.signal)
 
-      if (reset) {
-        images.value = data
-      } else {
-        images.value = [...images.value, ...data]
+      if (controller.signal.aborted || seq !== requestSeq) return
+
+      // Deduplicate in case two page requests overlap or the server data shifts.
+      const data = res.data.data
+        .map((img: any) => ({ ...img, is_favorite: !!img.is_favorite }))
+        .filter((img: Image) => !loadedIds.has(img.id))
+
+      for (const img of data) loadedIds.add(img.id)
+
+      if (data.length > 0) {
+        // Mutate in place and notify once instead of copying the whole array per page.
+        images.value.push(...data)
+        imagesVersion.value++
+        triggerRef(images)
       }
-      
+
       total.value = res.data.total
       page.value += 1
-    } catch (error) {
-      console.error('Failed to fetch images', error)
+
+      // If the server returns an empty page before reaching total, stop pagination.
+      if (data.length === 0 && images.value.length < total.value) {
+        total.value = images.value.length
+      }
+    } catch (error: any) {
+      const cancelled = error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError'
+      if (!cancelled && seq === requestSeq) {
+        console.error('Failed to fetch images', error)
+      }
     } finally {
-      loading.value = false
+      if (seq === requestSeq) {
+        loading.value = false
+        activeController = null
+      }
     }
   }
 
-  // Watch folder, favorites, sort, or search change to reset images
-  watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () => {
+  // Folder/filter/sort changes should react immediately.
+  watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder], () => {
     fetchImages(true)
   })
+
+  // Typing in the search box should not trigger one request per keystroke.
+  watchDebounced(searchQuery, () => {
+    fetchImages(true)
+  }, { debounce: 300 })
 
   // Watch user auth change to reset folder and images
   watch([user, token], () => {
@@ -111,17 +149,17 @@ export const useImageStore = defineStore('image', () => {
       const res = await toggleImageFavorite(image.id)
       const newState = res.data.is_favorite
       
-      // Update the image in the list
+      // Update the image in the list without copying the whole array.
       const index = images.value.findIndex(img => img.id === image.id)
       if (index !== -1) {
-        const updatedImages = [...images.value]
-        updatedImages[index] = { ...updatedImages[index], is_favorite: newState }
-        images.value = updatedImages
+        images.value[index] = { ...images.value[index], is_favorite: newState }
+        triggerRef(images)
       }
       
       // If we are in favorites view and unfavorite, remove from list
       if (showOnlyFavorites.value && !newState) {
         images.value = images.value.filter(img => img.id !== image.id)
+        loadedIds.delete(image.id)
         total.value -= 1
       }
       
@@ -160,6 +198,7 @@ export const useImageStore = defineStore('image', () => {
         
         // Remove locally from current view
         images.value = images.value.filter(img => !idsToMove.includes(img.id))
+        idsToMove.forEach(id => loadedIds.delete(id))
         total.value = Math.max(0, total.value - res.data.moved)
         
         // If we're now low on images, fetch more without reset
@@ -183,6 +222,7 @@ export const useImageStore = defineStore('image', () => {
         
         // Remove locally instead of full refresh with reset
         images.value = images.value.filter(img => !idsToDelete.includes(img.id))
+        idsToDelete.forEach(id => loadedIds.delete(id))
         total.value = Math.max(0, total.value - res.data.deleted)
         
         // If we're now low on images, fetch more without reset
@@ -197,6 +237,7 @@ export const useImageStore = defineStore('image', () => {
 
   const removeImageLocally = (id: number) => {
     images.value = images.value.filter(img => img.id !== id)
+    loadedIds.delete(id)
     total.value = Math.max(0, total.value - 1)
   }
 
@@ -252,12 +293,11 @@ export const useImageStore = defineStore('image', () => {
     try {
       const res = await updateImage(id, { file_name: newName })
       if (res.data.success) {
-        // Update the image in the list
+        // Update the image in place and notify once.
         const index = images.value.findIndex(img => img.id === id)
         if (index !== -1) {
-          const updatedImages = [...images.value]
-          updatedImages[index] = { ...updatedImages[index], file_name: newName }
-          images.value = updatedImages
+          images.value[index] = { ...images.value[index], file_name: newName }
+          triggerRef(images)
         }
         return { success: true }
       }
@@ -271,6 +311,7 @@ export const useImageStore = defineStore('image', () => {
 
   return {
     images,
+    imagesVersion,
     total,
     loading,
     showOnlyFavorites,

@@ -25,6 +25,7 @@ const showAddDialog = ref(false)
 const showLoginDialog = ref(false)
 const newFolderPath = ref('')
 const newFolderName = ref('')
+const isLoggingIn = ref(false)
 
 const loginForm = ref({
   username: '',
@@ -65,22 +66,26 @@ const handleSelectTrash = () => {
 }
 
 const handleLogin = async () => {
+  if (isLoggingIn.value) return
+  isLoggingIn.value = true
   try {
     const res = await api.post('/auth/login', {
       username: loginForm.value.username,
       password: loginForm.value.password
     })
-    
+
     const { user: loggedInUser, token } = res.data
     await authStore.login(loggedInUser.username, loggedInUser.role, token)
-    
+
     // 登录成功后刷新文件夹列表
     await folderStore.fetchFolders()
-    
+
     ElMessage.success('登录成功')
     showLoginDialog.value = false
   } catch (err: any) {
     ElMessage.error(err.response?.data?.error || '登录失败')
+  } finally {
+    isLoggingIn.value = false
   }
 }
 
@@ -112,51 +117,53 @@ const handleAddFolder = async () => {
         </svg>
       </div>
       <span class="logo-text" v-if="!isSidebarCollapsed">PictureWeb</span>
-      <el-button 
-        class="toggle-btn" 
-        type="primary" 
-        link 
-        :icon="isSidebarCollapsed ? Expand : Fold" 
+      <el-button
+        class="toggle-btn"
+        type="primary"
+        link
+        :icon="isSidebarCollapsed ? Expand : Fold"
         @click="uiStore.toggleSidebar"
       ></el-button>
     </div>
-    
+
     <nav class="sidebar-nav">
         <div class="nav-group">
-            <div class="nav-title" v-if="!isSidebarCollapsed">管理</div>
-            <a href="#" class="nav-item" :title="isSidebarCollapsed ? '所有照片' : ''" :class="{ active: currentFolderId === undefined && !showOnlyFavorites && !showAdminView && !showTrash }" @click.prevent="handleSelect(undefined)">
+            <div class="nav-title" v-if="!isSidebarCollapsed"><span>浏览</span></div>
+            <button type="button" class="nav-item" :title="isSidebarCollapsed ? '所有照片' : ''" :aria-current="currentFolderId === undefined && !showOnlyFavorites && !showAdminView && !showTrash ? 'page' : undefined" :class="{ active: currentFolderId === undefined && !showOnlyFavorites && !showAdminView && !showTrash }" @click="handleSelect(undefined)">
                 <el-icon><Folder /></el-icon> <span v-if="!isSidebarCollapsed">所有照片</span>
-            </a>
-            <a v-if="isLoggedIn" href="#" class="nav-item" :title="isSidebarCollapsed ? '收藏夹' : ''" :class="{ active: showOnlyFavorites }" @click.prevent="handleSelectFavorites">
+            </button>
+            <button v-if="isLoggedIn" type="button" class="nav-item" :title="isSidebarCollapsed ? '收藏夹' : ''" :aria-current="showOnlyFavorites ? 'page' : undefined" :class="{ active: showOnlyFavorites }" @click="handleSelectFavorites">
                 <el-icon><Star /></el-icon> <span v-if="!isSidebarCollapsed">收藏夹</span>
-            </a>
-            <a v-if="isLoggedIn && !isGuest" href="#" class="nav-item" :title="isSidebarCollapsed ? '回收站' : ''" :class="{ active: showTrash }" @click.prevent="handleSelectTrash">
+            </button>
+            <button v-if="isLoggedIn && !isGuest" type="button" class="nav-item" :title="isSidebarCollapsed ? '回收站' : ''" :aria-current="showTrash ? 'page' : undefined" :class="{ active: showTrash }" @click="handleSelectTrash">
                 <el-icon><Delete /></el-icon> <span v-if="!isSidebarCollapsed">回收站</span>
-            </a>
-            <a v-if="isLoggedIn && user?.role === 'admin'" href="#" class="nav-item" :title="isSidebarCollapsed ? '系统管理' : ''" :class="{ active: showAdminView }" @click.prevent="handleSelectAdmin">
+            </button>
+            <button v-if="isLoggedIn && user?.role === 'admin'" type="button" class="nav-item" :title="isSidebarCollapsed ? '系统管理' : ''" :aria-current="showAdminView ? 'page' : undefined" :class="{ active: showAdminView }" @click="handleSelectAdmin">
                 <el-icon><Setting /></el-icon> <span v-if="!isSidebarCollapsed">系统管理</span>
-            </a>
+            </button>
         </div>
-        
+
         <div class="nav-group">
             <div class="nav-title" v-if="!isSidebarCollapsed">
-                文件夹
-                <template v-if="isLoggedIn && !isGuest">
-                  <el-button type="primary" link :icon="Plus" @click.stop="showAddDialog = true" size="small" style="float: right; color: var(--text-secondary);"></el-button>
-                  <el-button link :icon="Refresh" @click.stop="folderStore.fetchFolders()" size="small" style="float: right; color: var(--text-secondary); margin-right: 5px;"></el-button>
-                </template>
+                <span>文件夹</span>
+                <div v-if="isLoggedIn && !isGuest" class="nav-title-actions">
+                  <el-button class="nav-icon-btn" text circle :icon="Plus" title="添加文件夹" aria-label="添加文件夹" @click.stop="showAddDialog = true" />
+                  <el-button class="nav-icon-btn" text circle :icon="Refresh" title="刷新文件夹" aria-label="刷新文件夹" @click.stop="folderStore.fetchFolders()" />
+                </div>
             </div>
             <div id="folder-list" class="folder-list">
-                <div 
-                    v-for="folder in folders" 
-                    :key="folder.id" 
+                <button
+                    v-for="folder in folders"
+                    :key="folder.id"
+                    type="button"
                     class="folder-item"
                     :title="isSidebarCollapsed ? folder.name : ''"
+                    :aria-current="currentFolderId === folder.id ? 'page' : undefined"
                     :class="{ active: currentFolderId === folder.id }"
                     @click="handleSelect(folder.id)"
                 >
                     <el-icon><Folder /></el-icon> <span v-if="!isSidebarCollapsed">{{ folder.name }}</span>
-                </div>
+                </button>
             </div>
         </div>
     </nav>
@@ -169,40 +176,40 @@ const handleAddFolder = async () => {
                 <span class="user-role">{{ isLoggedIn ? (authStore.isAdmin ? '管理员' : '普通用户') : '只读权限' }}</span>
             </div>
         </div>
-        <button v-if="!isLoggedIn" class="btn-login" :title="isSidebarCollapsed ? '登录' : ''" @click="showLoginDialog = true">
+        <button v-if="!isLoggedIn" class="btn-login" :title="isSidebarCollapsed ? '登录' : ''" aria-label="登录" @click="showLoginDialog = true">
             <el-icon><User /></el-icon> <span v-if="!isSidebarCollapsed">登录</span>
         </button>
-        <button v-else class="btn-login" :title="isSidebarCollapsed ? '退出' : ''" @click="handleLogout">
+        <button v-else class="btn-login" :title="isSidebarCollapsed ? '退出' : ''" aria-label="退出登录" @click="handleLogout">
             <el-icon><SwitchButton /></el-icon> <span v-if="!isSidebarCollapsed">退出</span>
         </button>
     </div>
 
     <!-- Login Dialog -->
-    <el-dialog v-model="showLoginDialog" title="用户登录" width="400px">
-      <el-form :model="loginForm" label-width="60px">
+    <el-dialog v-model="showLoginDialog" title="用户登录" width="400px" :close-on-click-modal="false" @closed="loginForm.username = ''; loginForm.password = ''">
+      <el-form :model="loginForm" label-width="60px" @keyup.enter="handleLogin">
         <el-form-item label="账号">
-          <el-input v-model="loginForm.username" placeholder="请输入用户名" />
+          <el-input v-model="loginForm.username" placeholder="请输入用户名" autocomplete="username" />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="loginForm.password" type="password" placeholder="请输入密码" show-password />
+          <el-input v-model="loginForm.password" type="password" placeholder="请输入密码" show-password autocomplete="current-password" />
         </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="showLoginDialog = false">取消</el-button>
-          <el-button type="primary" @click="handleLogin">登录</el-button>
+          <el-button type="primary" :loading="isLoggingIn" @click="handleLogin">登录</el-button>
         </span>
       </template>
     </el-dialog>
 
     <!-- Add Folder Dialog -->
-    <el-dialog v-model="showAddDialog" title="添加文件夹" width="500px">
-      <el-form label-width="80px">
+    <el-dialog v-model="showAddDialog" title="添加文件夹" width="500px" :close-on-click-modal="false">
+      <el-form label-width="80px" @keyup.enter="handleAddFolder">
         <el-form-item label="路径">
-          <el-input v-model="newFolderPath" placeholder="文件夹绝对路径" />
+          <el-input v-model="newFolderPath" placeholder="文件夹绝对路径" autocomplete="off" />
         </el-form-item>
         <el-form-item label="名称">
-          <el-input v-model="newFolderName" placeholder="显示名称 (可选)" />
+          <el-input v-model="newFolderName" placeholder="显示名称 (可选)" autocomplete="off" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -244,12 +251,20 @@ const handleAddFolder = async () => {
 }
 
 .logo-icon-wrapper {
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    background: var(--primary-soft);
+    border-radius: 10px;
+    padding: 5px;
+    transition: transform var(--motion-fast) var(--ease-out);
+}
+
+.logo-icon-wrapper:hover {
+    transform: scale(1.05);
 }
 
 .logo-icon-svg {
@@ -258,9 +273,9 @@ const handleAddFolder = async () => {
 }
 
 .logo-text {
-    font-size: 18px;
-    font-weight: bold;
-    letter-spacing: 0.5px;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -289,7 +304,7 @@ const handleAddFolder = async () => {
         width: 0;
         border-right: none;
     }
-    
+
     .sidebar.collapsed .toggle-btn {
         right: -40px;
         display: flex;
@@ -308,77 +323,125 @@ const handleAddFolder = async () => {
 }
 
 .nav-title {
-    padding: 0 20px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px 8px;
     font-size: 11px;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-    letter-spacing: 1px;
+    color: var(--text-tertiary);
+    letter-spacing: 0.06em;
     white-space: nowrap;
+}
+
+.nav-title-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.nav-icon-btn {
+    width: 26px;
+    height: 26px;
+    padding: 0 !important;
+    color: var(--text-secondary) !important;
+    border-radius: 6px;
+}
+
+.nav-icon-btn:hover {
+    color: var(--text-primary) !important;
+    background: var(--accent);
 }
 
 .nav-item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 20px;
+    gap: 10px;
+    width: calc(100% - 20px);
+    margin: 2px 10px;
+    padding: 10px 12px;
     color: var(--text-primary);
     text-decoration: none;
-    font-size: 14px;
-    transition: all 0.2s;
+    font-size: 13.5px;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    text-align: left;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out);
     cursor: pointer;
     white-space: nowrap;
 }
 
 .sidebar.collapsed .nav-item {
     justify-content: center;
+    width: calc(100% - 16px);
+    margin: 2px 8px;
     padding: 10px 0;
 }
 
-.nav-item:hover, .nav-item.active {
+.nav-item:hover {
     background-color: var(--accent);
 }
 
 .nav-item.active {
+    background-color: var(--primary-soft);
     color: var(--primary);
-    border-right: 3px solid var(--primary);
+}
+
+.nav-item.active .el-icon {
+    color: var(--primary);
 }
 
 .folder-list {
-    margin-top: 4px;
+    margin-top: 2px;
 }
 
 .folder-item {
-    padding: 8px 20px 8px 36px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: calc(100% - 20px);
+    margin: 1px 10px;
+    padding: 8px 12px 8px 34px;
     font-size: 13px;
     color: var(--text-secondary);
     cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    text-align: left;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out);
 }
 
 .sidebar.collapsed .folder-item {
+    width: calc(100% - 16px);
+    margin: 1px 8px;
     padding: 8px 0;
     justify-content: center;
 }
 
-.folder-item:hover, .folder-item.active {
+.folder-item:hover {
     color: var(--text-primary);
     background-color: var(--accent);
 }
 
+.folder-item.active {
+    color: var(--primary);
+    background-color: var(--primary-soft);
+}
+
 .sidebar-footer {
-    padding: 16px;
+    padding: 12px;
     border-top: 1px solid var(--border-color);
     flex-shrink: 0;
 }
 
 .sidebar.collapsed .sidebar-footer {
-    padding: 16px 0;
+    padding: 12px 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -388,22 +451,27 @@ const handleAddFolder = async () => {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
+    padding: 8px;
+    border-radius: 10px;
+    background: var(--bg-secondary);
 }
 
 .sidebar.collapsed .user-info {
     margin-bottom: 8px;
+    padding: 4px;
+    background: transparent;
 }
 
 .avatar {
     width: 32px;
     height: 32px;
-    background: var(--primary);
+    background: linear-gradient(135deg, var(--primary), #6bb6ff);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: bold;
+    font-weight: 600;
     font-size: 14px;
     color: white;
     flex-shrink: 0;
@@ -432,14 +500,15 @@ const handleAddFolder = async () => {
 
 .btn-login {
     width: 100%;
-    padding: 8px;
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-    border-radius: 4px;
+    padding: 9px;
+    background: var(--primary);
+    border: 1px solid transparent;
+    color: #fff;
+    border-radius: 10px;
     cursor: pointer;
     font-size: 13px;
-    transition: all 0.2s;
+    transition: filter var(--motion-fast) var(--ease-out),
+                background-color var(--motion-fast) var(--ease-out);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -447,11 +516,16 @@ const handleAddFolder = async () => {
     white-space: nowrap;
 }
 
+.btn-login:hover {
+    filter: brightness(1.06);
+}
+
 .sidebar.collapsed .btn-login {
-    border: none;
     width: 32px;
     height: 32px;
     padding: 0;
     border-radius: 50%;
+    background: var(--primary-soft);
+    color: var(--primary);
 }
 </style>

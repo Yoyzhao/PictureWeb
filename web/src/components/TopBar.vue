@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, Setting, Plus, Sunny, Moon, Expand, Fold } from '@element-plus/icons-vue'
+import { Search, Setting, Plus, Sunny, Moon, Expand, Fold, Close } from '@element-plus/icons-vue'
 import { ref, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useImageStore } from '@/stores/image'
@@ -50,11 +50,24 @@ const handleSettings = () => {
           type="text" 
           placeholder="搜索文件名..." 
           class="search-input"
+          aria-label="搜索文件名"
+          autocomplete="off"
+          spellcheck="false"
+          @keydown.esc="searchQuery = ''"
         >
+        <button
+          v-if="searchQuery"
+          class="search-clear"
+          type="button"
+          aria-label="清空搜索"
+          @click="searchQuery = ''"
+        >
+          <el-icon><Close /></el-icon>
+        </button>
       </div>
     </div>
     <div class="action-buttons">
-      <el-radio-group v-model="themeValue" size="small" class="theme-toggle">
+      <el-radio-group v-model="themeValue" size="small" class="theme-toggle" aria-label="主题切换">
         <el-radio-button value="light">
           <el-icon><Sunny /></el-icon>
         </el-radio-button>
@@ -62,10 +75,10 @@ const handleSettings = () => {
           <el-icon><Moon /></el-icon>
         </el-radio-button>
       </el-radio-group>
-      <button class="btn-icon" title="上传" @click="handleUpload">
+      <button class="btn-icon" title="上传（开发中）" aria-label="上传（开发中）" @click="handleUpload">
         <el-icon><Plus /></el-icon>
       </button>
-      <button class="btn-icon" title="设置" @click="handleSettings">
+      <button class="btn-icon" title="设置" aria-label="设置" @click="handleSettings">
         <el-icon><Setting /></el-icon>
       </button>
     </div>
@@ -149,17 +162,50 @@ const handleSettings = () => {
 
 .search-input {
     width: 100%;
-    padding: 8px 12px 8px 36px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 20px;
+    height: 38px;
+    padding: 8px 36px 8px 36px;
+    background: var(--bg-secondary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
     color: var(--text-primary);
     outline: none;
     font-size: 14px;
+    transition: border-color var(--motion-fast) var(--ease-out),
+                background-color var(--motion-fast) var(--ease-out),
+                box-shadow var(--motion-fast) var(--ease-out);
+}
+
+.search-input::placeholder {
+    color: var(--text-tertiary);
 }
 
 .search-input:focus {
     border-color: var(--primary);
+    background: var(--bg-card);
+    box-shadow: var(--focus-ring);
+}
+
+.search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.search-clear:hover {
+    background: var(--accent);
+    color: var(--text-primary);
 }
 
 .action-buttons {
@@ -170,6 +216,9 @@ const handleSettings = () => {
 }
 
 .btn-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
     background: transparent;
     border: none;
     color: var(--text-primary);
@@ -178,9 +227,12 @@ const handleSettings = () => {
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out);
 }
 
 .btn-icon:hover {
+    background: var(--accent);
     color: var(--primary);
 }
 </style>

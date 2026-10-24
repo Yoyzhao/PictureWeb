@@ -59,7 +59,7 @@ graph TD
 - 基础前缀：`/api`
 - 鉴权：`Authorization: Bearer <token>`；Token 由 `itsdangerous` 签名，`SECRET_KEY` 来自 `.env`，默认有效期 7 天
 - 响应：JSON；错误统一为 `{"error": "..."}`，由 HTTP 状态码表达结果
-- 分页：`page`（默认 1）、`per_page`（默认 50）
+- 分页：`page`（默认 1，最小 1）、`per_page`（默认 50，范围 1–200）
 - 匿名访问：公开文件夹的读取接口允许无 Token；写操作和管理员接口要求登录
 - 当前未实现独立的标签 CRUD 路由；标签表与关联表已存在，但接口能力有限
 
@@ -146,6 +146,12 @@ graph TD
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
 | GET | `/api/health` | 公开 | 返回 `{"status": "ok"}` |
+
+### 4.7 客户端公开设置
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | `/api/settings` | 公开 | 只返回 `HOTKEYS` 与 `ENABLE_PRELOAD`；不暴露 `.env` 或管理员配置 |
 
 ## 5. 服务器架构图
 
@@ -540,16 +546,25 @@ PicGallery/
 ## 10. 性能优化策略
 
 ### 10.1 数据库优化
-- 使用合适的索引策略
-- 定期VACUUM清理数据库
-- 使用预编译语句
+
+- 已为 `images(file_path)`、`images(folder_id)`、`images(modified_time)` 建立索引，并新增 `images(folder_id, modified_time)`、`images(file_name)`、`images(file_size)`、`folders(is_public)`。
+- SQLite 连接启用 `journal_mode=WAL`、`synchronous=NORMAL`、`cache_size=-20000`、`temp_store=MEMORY`，降低浏览读取与扫描写入的相互阻塞。
+- `GET /api/images` 的 `page` 最小为 1、`per_page` 限制在 1–200，避免异常大分页。
+- 图片响应启用条件请求与缓存头：缩略图 `max-age=86400`，原图/下载 `max-age=3600`。
+- 后续：FTS5（trigram）替换 `LIKE '%q%'` 搜索；定期 `ANALYZE`/`VACUUM`；按需增加复合索引。
 
 ### 10.2 前端优化
-- 虚拟滚动技术
-- 图片懒加载
-- 防抖节流处理
 
-### 10.3 后端优化
-- 异步处理扫描任务
-- 连接池管理
-- 缓存策略
+- 虚拟瀑布流使用二分查找定位可见区间，滚动复杂度 O(log n + 可见项)，不再逐帧过滤全部已加载项。
+- 分页追加使用原地 `push` + `triggerRef` + `itemsVersion`，避免每页 O(n) 数组复制。
+- 搜索 300ms 防抖；请求使用 `AbortController` 取消并通过序号丢弃乱序响应；按图片 ID 去重。
+- 图片网格与灯箱使用 `loading="lazy"`、`decoding="async"`；大网格使用 `medium` 缩略图。
+- 灯箱原图预加载增加 6MB 体积门槛与 120 条 URL 上限，切换时清理定时器；滚轮缩放按帧合并。
+- 动效仅使用 `transform/opacity`，虚拟列表不使用 `transition-group` 与全量 `will-change`，并支持 `prefers-reduced-motion`。
+- 后续：窗口化数据源/keyset 分页、响应式图片（srcset/WebP）、Element Plus 与 Lightbox 代码拆分。
+
+### 10.3 后端与图片处理优化
+
+- 缩略图按需生成并落盘缓存；缩略图记录写入 `thumbnails` 表。
+- 扫描任务使用后台线程，进度每 10 个文件更新一次；100k 规模可进一步改为批量提交。
+- 10 万张规模的后续重点：缩略图预生成队列、WebP/AVIF、受限并发与失败占位缓存。

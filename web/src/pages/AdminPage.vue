@@ -22,6 +22,19 @@ const hotkeyLabels: Record<string, string> = {
   RESET: '重置视图 (Home)'
 }
 
+const roleLabels: Record<string, string> = {
+  admin: '管理员',
+  user: '普通用户',
+  guest: '访客'
+}
+
+const permissionLabels: Record<string, string> = {
+  read: '只读',
+  write: '编辑',
+  delete: '删除',
+  rename: '重命名'
+}
+
 const startRecording = (key: string) => {
   recordingHotkey.value = key
   window.addEventListener('keydown', handleRecordKey)
@@ -442,7 +455,10 @@ const saveSettings = async () => {
 <template>
   <div class="admin-container">
     <div class="content-header">
-      <h1 class="current-folder">系统管理</h1>
+      <div>
+        <h1 class="current-folder">系统管理</h1>
+        <p class="page-subtitle">管理扫描目录、用户权限与系统配置</p>
+      </div>
     </div>
     <el-tabs v-model="activeTab" class="admin-tabs">
       <el-tab-pane label="文件夹管理" name="folders">
@@ -510,7 +526,7 @@ const saveSettings = async () => {
             <el-table-column prop="username" label="用户名" />
             <el-table-column prop="role" label="角色">
               <template #default="{ row }">
-                <el-tag :type="row.role === 'admin' ? 'danger' : 'info'">{{ row.role }}</el-tag>
+                <el-tag :type="row.role === 'admin' ? 'danger' : 'info'">{{ roleLabels[row.role] || row.role }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="created_at" label="创建时间" />
@@ -537,7 +553,7 @@ const saveSettings = async () => {
             <el-table-column prop="folder_name" label="文件夹" />
             <el-table-column prop="permission_type" label="权限类型">
                <template #default="{ row }">
-                <el-tag>{{ row.permission_type }}</el-tag>
+                <el-tag>{{ permissionLabels[row.permission_type] || row.permission_type }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="100">
@@ -784,33 +800,63 @@ const saveSettings = async () => {
 }
 
 .content-header {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   flex-shrink: 0;
 }
 
 .current-folder {
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   margin: 0;
+}
+
+.page-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .admin-tabs {
   background: var(--bg-card);
-  padding: 30px;
-  border-radius: 12px;
+  padding: 24px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border-color);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-sm);
   flex: 1;
 }
 
+.admin-tabs :deep(.el-tabs__header) {
+  margin-bottom: 12px;
+}
+
+.admin-tabs :deep(.el-tabs__item) {
+  font-weight: 500;
+}
+
+.admin-tabs :deep(.el-tabs__active-bar) {
+  height: 3px;
+  border-radius: 3px;
+}
+
 .tab-content {
-  padding: 20px 0;
+  padding: 8px 0 0;
 }
 
 .action-bar {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   display: flex;
   justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-tabs :deep(.el-table) {
+  --el-table-border-color: var(--border-color);
+  --el-table-header-bg-color: var(--bg-secondary);
+  --el-table-row-hover-bg-color: var(--accent);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 .form-tip {

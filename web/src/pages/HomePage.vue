@@ -113,12 +113,23 @@ const handleNext = async () => {
 
 <style scoped>
 .app-container {
+  --current-sidebar-width: var(--sidebar-width);
   display: flex;
   height: 100vh;
   width: 100vw;
   overflow: hidden;
   background-color: var(--bg-main);
   color: var(--text-primary);
+}
+
+.app-container.sidebar-collapsed {
+  --current-sidebar-width: 64px;
+}
+
+@media (max-width: 768px) {
+  .app-container.sidebar-collapsed {
+    --current-sidebar-width: 0px;
+  }
 }
 
 .main-content {
@@ -132,7 +143,7 @@ const handleNext = async () => {
 /* 视图切换动画 */
 .fade-slide-enter-active,
 .fade-slide-leave-active {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
 }
 
 .fade-slide-enter-from {
@@ -148,7 +159,7 @@ const handleNext = async () => {
 /* 灯箱淡入淡出 */
 .lightbox-fade-enter-active,
 .lightbox-fade-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity var(--motion-base) var(--ease-out);
 }
 
 .lightbox-fade-enter-from,

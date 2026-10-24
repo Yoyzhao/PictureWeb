@@ -248,12 +248,12 @@ def get_trash_thumbnail(id):
     size = request.args.get('size', 'medium')
     try:
         thumb_path = generate_thumbnail(trash_item['trash_path'], size)
-        return send_file(thumb_path)
+        return send_file(thumb_path, max_age=3600, conditional=True)
     except Exception as e:
         current_app.logger.error(f"Thumbnail generation failed for trash item {id}: {e}")
         # Fallback to original if thumbnail fails
         if os.path.exists(trash_item['trash_path']):
-            return send_file(trash_item['trash_path'])
+            return send_file(trash_item['trash_path'], max_age=3600, conditional=True)
         abort(404)
 
 @bp.route('/trash/restore', methods=['POST'])
@@ -388,9 +388,10 @@ def get_images():
     user = get_current_user()
     user_id = user['id'] if user else None
     
-    # Pagination
-    page = request.args.get('page', 1, type=int)
+    # Pagination (cap page size to protect the server at 100k-image scale)
+    page = max(request.args.get('page', 1, type=int), 1)
     per_page = request.args.get('per_page', 50, type=int)
+    per_page = min(max(per_page, 1), 200)
     offset = (page - 1) * per_page
     
     # Filtering
@@ -586,7 +587,7 @@ def get_image_thumbnail(id):
     thumb_path = generate_thumbnail(id, size_type)
     
     if thumb_path and os.path.exists(thumb_path):
-        return send_file(thumb_path)
+        return send_file(thumb_path, max_age=86400, conditional=True)
     else:
         # Return a placeholder or 404
         return jsonify({'error': 'Thumbnail generation failed'}), 404
@@ -603,7 +604,7 @@ def get_image_raw(id):
     if not os.path.exists(file_path):
         return jsonify({'error': 'File not found on disk'}), 404
         
-    return send_file(file_path)
+    return send_file(file_path, max_age=3600, conditional=True)
 
 @bp.route('/<int:id>/download', methods=['GET'])
 def download_image(id):
@@ -620,5 +621,7 @@ def download_image(id):
     return send_file(
         file_path,
         as_attachment=True,
-        download_name=image['file_name']
+        download_name=image['file_name'],
+        max_age=3600,
+        conditional=True
     )

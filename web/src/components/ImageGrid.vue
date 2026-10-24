@@ -10,13 +10,14 @@ import { ElMessageBox, ElMessage } from 'element-plus'
 import VirtualWaterfall from './common/VirtualWaterfall.vue'
 
 const imageStore = useImageStore()
-const { images, loading, total, showOnlyFavorites, sortBy, sortOrder, selectedImageIds, gridSize } = storeToRefs(imageStore)
+const { images, imagesVersion, loading, total, showOnlyFavorites, sortBy, sortOrder, selectedImageIds, gridSize } = storeToRefs(imageStore)
 const folderStore = useFolderStore()
 const { folders, currentFolderId } = storeToRefs(folderStore)
 const authStore = useAuthStore()
 const { user, isLoggedIn } = storeToRefs(authStore)
 
 const isGuest = computed(() => !isLoggedIn.value || user.value?.role === 'guest')
+const selectedIdSet = computed(() => new Set(selectedImageIds.value))
 
 const showMoveDialog = ref(false)
 const targetFolderId = ref<number | null>(null)
@@ -151,7 +152,7 @@ onMounted(() => {
 
 const emit = defineEmits(['open-lightbox'])
 
-const getThumbnailUrl = (id: number) => `/api/images/${id}/thumbnail?size=small`
+const getThumbnailUrl = (id: number) => `/api/images/${id}/thumbnail?size=${thumbnailSize.value}`
 
 const columnWidthMap = {
   small: 180,
@@ -160,12 +161,23 @@ const columnWidthMap = {
 }
 
 const currentColumnWidth = computed(() => columnWidthMap[gridSize.value])
+const thumbnailSize = computed(() => gridSize.value === 'large' ? 'medium' : 'small')
+const metaHeight = computed(() => gridSize.value === 'small' ? 32 : 68)
+
+const formatDate = (value: any) => {
+  if (value === null || value === undefined || value === '') return '-'
+  let date = new Date(value)
+  if (isNaN(date.getTime())) {
+    date = new Date(Number(value) * 1000)
+  }
+  return isNaN(date.getTime()) ? '-' : date.toLocaleDateString()
+}
 
 const toggleFavorite = (img: any) => {
   imageStore.toggleFavorite(img)
 }
 
-const isSelected = (id: number) => selectedImageIds.value.includes(id)
+const isSelected = (id: number) => selectedIdSet.value.has(id)
 
 const handleCardClick = (img: any, event: MouseEvent) => {
   if (event.ctrlKey || event.metaKey) {
@@ -212,9 +224,11 @@ const toggleSelection = (id: number) => {
     <div class="scrollable-content" ref="scrollableRef">
       <VirtualWaterfall 
         :items="images" 
+        :items-version="imagesVersion"
         :column-width="currentColumnWidth"
         :gap="16" 
         :buffer="1000"
+        :meta-height="metaHeight"
         @load-more="imageStore.fetchImages()"
       >
       <template #default="{ item: img }">
@@ -224,15 +238,15 @@ const toggleSelection = (id: number) => {
           @click="handleCardClick(img, $event)"
         >
           <div class="card-checkbox" @click.stop="toggleSelection(img.id)">
-              <el-checkbox :model-value="isSelected(img.id)"></el-checkbox>
+              <el-checkbox :model-value="isSelected(img.id)" :aria-label="`选择 ${img.file_name}`"></el-checkbox>
           </div>
-          <img :src="getThumbnailUrl(img.id)" loading="lazy" :alt="img.file_name" />
+          <img :src="getThumbnailUrl(img.id)" loading="lazy" decoding="async" :alt="img.file_name" :title="img.file_name" />
           <div class="card-overlay">
-              <button v-if="isLoggedIn && !isGuest" class="action-btn fav-btn" :class="{ active: img.is_favorite }" @click.stop="toggleFavorite(img)">
+              <button v-if="isLoggedIn && !isGuest" class="action-btn fav-btn" :class="{ active: img.is_favorite }" :aria-label="img.is_favorite ? '取消收藏' : '收藏'" @click.stop="toggleFavorite(img)">
                   <el-icon><Star /></el-icon>
               </button>
               <el-dropdown trigger="click">
-                  <button class="action-btn more-btn" @click.stop>
+                  <button class="action-btn more-btn" aria-label="更多操作" @click.stop>
                       <el-icon><More /></el-icon>
                   </button>
                   <template #dropdown>
@@ -250,7 +264,7 @@ const toggleSelection = (id: number) => {
             <div class="img-name">{{ img.file_name }}</div>
             <div class="img-meta">
               {{ img.width }} x {{ img.height }} | {{ (img.file_size / 1024 / 1024).toFixed(2) }} MB | 
-              {{ isNaN(new Date(img.modified_time).getTime()) ? (new Date(img.modified_time * 1000).toLocaleDateString()) : (new Date(img.modified_time).toLocaleDateString()) }}
+              {{ formatDate(img.modified_time) }}
             </div>
           </div>
           <div class="img-info-mini" v-else>
@@ -260,11 +274,15 @@ const toggleSelection = (id: number) => {
       </template>
     </VirtualWaterfall>
 
+    <div v-if="loading && images.length === 0" class="skeleton-grid" aria-hidden="true">
+      <div v-for="i in 10" :key="i" class="skeleton-card"></div>
+    </div>
+
     <div v-if="images.length === 0 && !loading" class="empty-state">
       <el-empty :description="showOnlyFavorites ? '收藏夹还是空的' : '当前文件夹下没有照片'"></el-empty>
     </div>
     
-    <div v-if="loading" class="load-more">
+    <div v-if="loading && images.length > 0" class="load-more">
       <el-icon class="is-loading"><Loading /></el-icon>
     </div>
     <div v-else-if="images.length >= total && total > 0" class="load-more">
@@ -353,8 +371,9 @@ const toggleSelection = (id: number) => {
 }
 
 .fixed-header-container {
-    padding: 16px 24px 12px 24px;
-    background: var(--bg-body);
+    padding: 18px 24px 14px 24px;
+    background: var(--bg-main);
+    border-bottom: 1px solid var(--border-color);
     z-index: 10;
     flex-shrink: 0;
 }
@@ -362,7 +381,8 @@ const toggleSelection = (id: number) => {
 .scrollable-content {
     flex: 1;
     overflow-y: auto;
-    padding: 0 24px 24px 24px;
+    padding: 16px 24px 24px 24px;
+    scrollbar-gutter: stable;
     /* 留出底部状态栏的空间 */
     padding-bottom: calc(var(--status-bar-height) + 24px);
 }
@@ -370,25 +390,32 @@ const toggleSelection = (id: number) => {
 .content-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
+    align-items: center;
+    gap: 16px;
     margin-bottom: 0;
 }
 
 .current-folder {
-    font-size: 24px;
-    font-weight: 600;
+    font-size: 22px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
     margin: 0;
 }
 
 .view-options {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
+    flex-wrap: wrap;
 }
 
 .item-count {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    padding: 4px 10px;
 }
 
 .sort-select {
@@ -482,33 +509,46 @@ const toggleSelection = (id: number) => {
 
 .img-card {
     background: var(--bg-card);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     overflow: hidden;
     position: relative;
     cursor: pointer;
-    transition: transform 0.2s, border-color 0.2s;
-    border: 1px solid transparent;
-    width: 100%; /* Important: card takes full width of its absolute container */
+    transition: transform var(--motion-base) var(--ease-out),
+                box-shadow var(--motion-base) var(--ease-out),
+                border-color var(--motion-fast) var(--ease-out);
+    border: 1px solid var(--border-color);
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-sm);
 }
 
-.img-card:hover {
-    transform: translateY(-4px);
-    border-color: var(--primary);
+@media (hover: hover) {
+    .img-card:hover {
+        transform: translateY(-3px);
+        border-color: var(--primary);
+        box-shadow: var(--shadow-md);
+    }
 }
 
 .img-card img {
     width: 100%;
     height: auto;
     display: block;
-    background: #333;
+    background: var(--bg-secondary);
+    flex: 0 0 auto;
 }
 
 .img-info {
-    padding: 10px;
+    padding: 9px 10px;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .img-name {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
@@ -516,14 +556,20 @@ const toggleSelection = (id: number) => {
 }
 
 .img-meta {
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--text-secondary);
-    margin-top: 4px;
+    margin-top: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .img-info-mini {
     padding: 6px 8px;
     background: var(--bg-card);
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .img-name-mini {
@@ -551,41 +597,65 @@ const toggleSelection = (id: number) => {
     .sort-radio {
         order: 2;
     }
+    .status-bar {
+        padding: 0 12px;
+    }
+    .status-info {
+        display: none;
+    }
+    .batch-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
 }
 
 .card-overlay {
     position: absolute;
-    top: 10px;
-    right: 10px;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 88px;
     display: flex;
+    justify-content: flex-end;
+    align-items: flex-start;
     gap: 8px;
+    padding: 10px;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.42), transparent);
     opacity: 0;
-    transition: opacity 0.2s;
+    transition: opacity var(--motion-fast) var(--ease-out);
+    pointer-events: none;
 }
 
-.img-card:hover .card-overlay {
+.img-card:hover .card-overlay,
+.img-card.selected .card-overlay {
     opacity: 1;
+}
+
+.card-overlay .action-btn,
+.card-overlay .el-dropdown {
+    pointer-events: auto;
 }
 
 .action-btn {
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(15, 18, 22, 0.55);
     backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.18);
     color: white;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                transform var(--motion-fast) var(--ease-out);
 }
 
 .action-btn:hover {
     background: var(--primary);
     border-color: var(--primary);
-    transform: scale(1.1);
+    transform: scale(1.06);
 }
 
 .load-more {
@@ -600,10 +670,11 @@ const toggleSelection = (id: number) => {
 .status-bar {
     position: fixed;
     bottom: 0;
-    left: var(--sidebar-width);
+    left: var(--current-sidebar-width, var(--sidebar-width));
     right: 0;
     height: var(--status-bar-height);
-    background: var(--bg-sidebar);
+    background: var(--bg-topbar);
+    backdrop-filter: blur(14px);
     border-top: 1px solid var(--border-color);
     padding: 0 24px;
     display: flex;
@@ -612,6 +683,57 @@ const toggleSelection = (id: number) => {
     font-size: 12px;
     color: var(--text-secondary);
     z-index: 20;
+    transition: left var(--motion-base) var(--ease-out);
+}
+
+.status-info {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-info strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.batch-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    animation: batch-in var(--motion-base) var(--ease-out);
+}
+
+@keyframes batch-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+}
+
+.empty-state {
+    padding: 60px 0;
+}
+
+.skeleton-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+    padding-top: 4px;
+}
+
+.skeleton-card {
+    aspect-ratio: 4 / 5;
+    border-radius: var(--radius-md);
+    background: linear-gradient(100deg, var(--bg-secondary) 20%, var(--accent) 45%, var(--bg-secondary) 70%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s linear infinite;
+}
+
+@keyframes skeleton-shimmer {
+    from { background-position: 150% 0; }
+    to { background-position: -50% 0; }
 }
 
 .separator {

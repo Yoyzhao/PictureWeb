@@ -8,20 +8,23 @@ export interface WaterfallItem {
 </script>
 
 <script setup lang="ts" generic="T extends WaterfallItem">
-import { ref, computed, onMounted, onUnmounted, watch, shallowRef } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, shallowRef, triggerRef } from 'vue'
 import { useElementSize } from '@vueuse/core'
 
 const props = defineProps<{
   items: T[]
+  itemsVersion?: number
   columnWidth?: number
   gap?: number
   buffer?: number
+  /** Fixed height reserved below the image for title/meta content. */
+  metaHeight?: number
 }>()
 
 const emit = defineEmits(['load-more'])
 
-const gap = props.gap || 16
-const buffer = props.buffer || 800 // px buffer for virtual scroll
+const gapValue = props.gap ?? 16
+const bufferValue = props.buffer ?? 800
 
 const containerRef = ref<HTMLElement | null>(null)
 const { width: containerWidth } = useElementSize(containerRef)
@@ -30,17 +33,15 @@ const scrollContainerRef = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
 const viewportHeight = ref(0)
 
-// Calculate how many columns fit
 const columnsCount = computed(() => {
   if (!containerWidth.value) return 5
   const baseWidth = props.columnWidth || 280
-  return Math.max(1, Math.floor((containerWidth.value + gap) / (baseWidth + gap)))
+  return Math.max(1, Math.floor((containerWidth.value + gapValue) / (baseWidth + gapValue)))
 })
 
-// Current column width considering container size and gap
 const actualColumnWidth = computed(() => {
   if (!containerWidth.value) return props.columnWidth || 280
-  return (containerWidth.value - (columnsCount.value - 1) * gap) / columnsCount.value
+  return (containerWidth.value - (columnsCount.value - 1) * gapValue) / columnsCount.value
 })
 
 interface LayoutItem {
@@ -54,86 +55,164 @@ interface LayoutItem {
 
 const layoutItems = shallowRef<LayoutItem[]>([])
 const totalHeight = ref(0)
-const colHeights = ref<number[]>([])
 
-// Recalculate layout for all items or append new ones
+// Plain array: layout math does not need Vue reactivity for each column height.
+let colHeights: number[] = []
+
+const resetLayout = () => {
+  colHeights = new Array(columnsCount.value).fill(0)
+  layoutItems.value = []
+}
+
 const calculateLayout = (isAppend = false) => {
   if (!containerWidth.value || props.items.length === 0) {
-    layoutItems.value = []
+    resetLayout()
     totalHeight.value = 0
-    colHeights.value = new Array(columnsCount.value).fill(0)
     return
   }
 
-  if (!isAppend || colHeights.value.length !== columnsCount.value) {
-    colHeights.value = new Array(columnsCount.value).fill(0)
-    layoutItems.value = []
+  const columnsChanged = colHeights.length !== columnsCount.value
+  const listShrunk = layoutItems.value.length > props.items.length
+
+  if (!isAppend || columnsChanged || listShrunk) {
+    resetLayout()
   }
 
-  const startIdx = layoutItems.value.length
-  const newLayout: LayoutItem[] = isAppend ? [...layoutItems.value] : []
+  const layout = layoutItems.value
+  const startIdx = layout.length
+  const width = actualColumnWidth.value
+  const metaHeight = props.metaHeight ?? 64
 
   for (let i = startIdx; i < props.items.length; i++) {
     const item = props.items[i]
-    // Find the shortest column
-    let minHeight = colHeights.value[0]
+    let minHeight = colHeights[0]
     let colIndex = 0
-    for (let j = 1; j < colHeights.value.length; j++) {
-      if (colHeights.value[j] < minHeight) {
-        minHeight = colHeights.value[j]
+    for (let j = 1; j < colHeights.length; j++) {
+      if (colHeights[j] < minHeight) {
+        minHeight = colHeights[j]
         colIndex = j
       }
     }
 
-    // Calculate height based on actual column width
-    const ratio = item.height / item.width
-    const itemHeight = actualColumnWidth.value * ratio
-    
-    // gridSize is not available in props, but we can detect it from context or pass it
-    // For now, let's use a simpler way: if actualColumnWidth is small, use smaller extraHeight
-    const extraHeight = actualColumnWidth.value < 200 ? 32 : 64
+    // Unreadable images may report 0x0; fall back to a 4:3 placeholder ratio.
+    const sourceWidth = Number(item.width) || 0
+    const sourceHeight = Number(item.height) || 0
+    const ratio = sourceWidth > 0 && sourceHeight > 0 ? sourceHeight / sourceWidth : 0.75
+    const imageHeight = width * ratio
+    const itemHeight = imageHeight + metaHeight
 
-    newLayout.push({
+    layout.push({
       id: item.id,
       top: minHeight,
-      left: colIndex * (actualColumnWidth.value + gap),
-      width: actualColumnWidth.value,
-      height: itemHeight + extraHeight,
+      left: colIndex * (width + gapValue),
+      width,
+      height: itemHeight,
       item
     })
 
-    colHeights.value[colIndex] += itemHeight + extraHeight + gap
+    colHeights[colIndex] += itemHeight + gapValue
   }
 
-  layoutItems.value = newLayout
-  totalHeight.value = Math.max(...colHeights.value)
+  if (isAppend) {
+    // Mutate in place and notify Vue once. Avoids an O(n) array copy on every page append.
+    triggerRef(layoutItems)
+  } else {
+    layoutItems.value = layout
+  }
+
+  totalHeight.value = colHeights.length ? Math.max(...colHeights) : 0
+  maybeLoadMore()
 }
 
-// Visible items based on scroll position
-const visibleItems = computed(() => {
-  const start = scrollTop.value - buffer
-  const end = scrollTop.value + viewportHeight.value + buffer
+const lowerBoundByTop = (list: LayoutItem[], value: number) => {
+  let low = 0
+  let high = list.length
+  while (low < high) {
+    const mid = (low + high) >> 1
+    if (list[mid].top < value) low = mid + 1
+    else high = mid
+  }
+  return low
+}
 
-  return layoutItems.value.filter(item => {
-    const itemBottom = item.top + item.height
-    return itemBottom >= start && item.top <= end
-  })
+const upperBoundByTop = (list: LayoutItem[], value: number) => {
+  let low = 0
+  let high = list.length
+  while (low < high) {
+    const mid = (low + high) >> 1
+    if (list[mid].top <= value) low = mid + 1
+    else high = mid
+  }
+  return low
+}
+
+// Only walk the items intersecting the viewport instead of filtering the whole list.
+const visibleItems = computed(() => {
+  const list = layoutItems.value
+  if (!list.length) return []
+
+  const start = scrollTop.value - bufferValue
+  const end = scrollTop.value + viewportHeight.value + bufferValue
+
+  let startIdx = lowerBoundByTop(list, start)
+  while (startIdx > 0 && list[startIdx - 1].top + list[startIdx - 1].height >= start) {
+    startIdx--
+  }
+
+  const endIdx = upperBoundByTop(list, end)
+  return list.slice(startIdx, endIdx)
 })
 
-const handleScroll = (e: Event) => {
-  const target = e.target as HTMLElement
-  scrollTop.value = target.scrollTop
-  viewportHeight.value = target.clientHeight
+let lastLoadMoreAt = 0
 
-  // Check if near bottom to load more
-  if (scrollTop.value + viewportHeight.value >= totalHeight.value - 200) {
-    emit('load-more')
+const maybeLoadMore = () => {
+  if (!props.items.length || !viewportHeight.value) return
+  if (scrollTop.value + viewportHeight.value < totalHeight.value - 200) return
+
+  const now = performance.now()
+  if (now - lastLoadMoreAt < 250) return
+  lastLoadMoreAt = now
+  emit('load-more')
+}
+
+let scrollRaf = 0
+let pendingScrollTop = 0
+let pendingViewportHeight = 0
+
+const flushScroll = () => {
+  scrollRaf = 0
+  scrollTop.value = pendingScrollTop
+  viewportHeight.value = pendingViewportHeight
+  maybeLoadMore()
+}
+
+const handleScroll = (event: Event) => {
+  const target = event.target as HTMLElement
+  pendingScrollTop = target.scrollTop
+  pendingViewportHeight = target.clientHeight
+  if (!scrollRaf) {
+    scrollRaf = requestAnimationFrame(flushScroll)
   }
 }
 
-// Initial size and scroll container identification
+const syncViewport = () => {
+  const container = scrollContainerRef.value
+  if (!container) return
+  pendingScrollTop = container.scrollTop
+  pendingViewportHeight = container.clientHeight
+  scrollTop.value = pendingScrollTop
+  viewportHeight.value = pendingViewportHeight
+}
+
+const handleResize = () => {
+  syncViewport()
+  calculateLayout()
+}
+
+let lastItems: T[] | null = null
+let lastLength = 0
+
 onMounted(() => {
-  // Find the scrolling parent
   let parent = containerRef.value?.parentElement
   while (parent && parent !== document.documentElement) {
     const overflowY = window.getComputedStyle(parent).overflowY
@@ -148,46 +227,52 @@ onMounted(() => {
     scrollContainerRef.value = document.documentElement
   }
 
-  scrollContainerRef.value.addEventListener('scroll', handleScroll)
-  viewportHeight.value = scrollContainerRef.value.clientHeight
-  scrollTop.value = scrollContainerRef.value.scrollTop
-  
+  scrollContainerRef.value.addEventListener('scroll', handleScroll, { passive: true })
+  window.addEventListener('resize', handleResize, { passive: true })
+
+  syncViewport()
+  lastItems = props.items
+  lastLength = props.items.length
   calculateLayout()
 })
 
 onUnmounted(() => {
   scrollContainerRef.value?.removeEventListener('scroll', handleScroll)
+  window.removeEventListener('resize', handleResize)
+  if (scrollRaf) cancelAnimationFrame(scrollRaf)
 })
 
-watch([containerWidth, columnsCount, () => props.columnWidth], () => {
+watch([containerWidth, columnsCount, () => props.columnWidth, () => props.metaHeight], () => {
   calculateLayout()
 })
 
-watch(() => props.items, (newItems, oldItems) => {
-  const isAppend = newItems.length > oldItems.length && oldItems.length > 0 && newItems[0] === oldItems[0]
+watch([() => props.items, () => props.items.length, () => props.itemsVersion], ([items, length]) => {
+  const isAppend = items === lastItems && lastItems !== null && length > lastLength
+  lastItems = items
+  lastLength = length
   calculateLayout(isAppend)
-}, { deep: false })
-
+})
 </script>
 
 <template>
-  <div ref="containerRef" class="virtual-waterfall-container" :style="{ height: totalHeight + 'px' }">
-    <transition-group name="waterfall">
-      <div 
-        v-for="item in visibleItems" 
-        :key="item.id" 
-        class="virtual-waterfall-item"
-        :style="{
-          position: 'absolute',
-          top: item.top + 'px',
-          left: item.left + 'px',
-          width: item.width + 'px',
-          height: item.height + 'px'
-        }"
-      >
-        <slot :item="item.item"></slot>
-      </div>
-    </transition-group>
+  <div
+    ref="containerRef"
+    class="virtual-waterfall-container"
+    :style="{ height: totalHeight + 'px' }"
+  >
+    <div
+      v-for="item in visibleItems"
+      :key="item.id"
+      class="virtual-waterfall-item"
+      :style="{
+        top: item.top + 'px',
+        left: item.left + 'px',
+        width: item.width + 'px',
+        height: item.height + 'px'
+      }"
+    >
+      <slot :item="item.item"></slot>
+    </div>
   </div>
 </template>
 
@@ -198,22 +283,7 @@ watch(() => props.items, (newItems, oldItems) => {
 }
 
 .virtual-waterfall-item {
-  will-change: transform, opacity;
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease;
-}
-
-/* 瀑布流动画 */
-.waterfall-enter-from {
-  opacity: 0;
-  transform: translateY(20px);
-}
-
-.waterfall-leave-to {
-  opacity: 0;
-  transform: scale(0.9);
-}
-
-.waterfall-move {
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  position: absolute;
+  contain: layout paint style;
 }
 </style>

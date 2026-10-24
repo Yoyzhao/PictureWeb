@@ -65,6 +65,9 @@ def create_app(test_config=None):
 
     from .routes import auth
     app.register_blueprint(auth.bp)
+
+    from .routes import settings
+    app.register_blueprint(settings.bp)
     
     # Auto-initialize DB if it doesn't exist
     with app.app_context():

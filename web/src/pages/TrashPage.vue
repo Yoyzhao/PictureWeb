@@ -22,7 +22,9 @@ const columnWidthMap = {
 
 const currentColumnWidth = computed(() => columnWidthMap[gridSize.value])
 
-const isSelected = (id: number) => selectedTrashIds.value.includes(id)
+const isSelected = (id: number) => selectedTrashSet.value.has(id)
+const selectedTrashSet = computed(() => new Set(selectedTrashIds.value))
+const trashMetaHeight = computed(() => gridSize.value === 'small' ? 0 : 56)
 
 const toggleSelection = (id: number) => {
   const index = selectedTrashIds.value.indexOf(id)
@@ -108,7 +110,9 @@ const formatSize = (size: number) => {
 }
 
 const formatDate = (dateStr: string) => {
-  return new Date(dateStr).toLocaleString()
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return isNaN(date.getTime()) ? '-' : date.toLocaleString()
 }
 </script>
 
@@ -198,6 +202,7 @@ const formatDate = (dateStr: string) => {
           :column-width="currentColumnWidth"
           :gap="16" 
           :buffer="1000"
+          :meta-height="trashMetaHeight"
         >
           <template #default="{ item: img }">
             <div 
@@ -208,7 +213,7 @@ const formatDate = (dateStr: string) => {
               <div class="card-checkbox" @click.stop="toggleSelection(img.id)">
                   <el-checkbox :model-value="isSelected(img.id)"></el-checkbox>
               </div>
-              <img :src="`/api/images/trash/${img.id}/thumbnail?size=medium&token=${token}`" loading="lazy" :alt="img.file_name" />
+              <img :src="`/api/images/trash/${img.id}/thumbnail?size=medium&token=${token}`" loading="lazy" decoding="async" :alt="img.file_name" :title="img.file_name" />
               <div class="card-overlay">
                   <div class="trash-actions">
                     <el-button 
@@ -255,7 +260,8 @@ const formatDate = (dateStr: string) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .header-left {
@@ -266,8 +272,9 @@ const formatDate = (dateStr: string) => {
 
 .header-left h2 {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
 }
 
@@ -284,9 +291,10 @@ const formatDate = (dateStr: string) => {
 .trash-content {
   flex: 1;
   background-color: var(--bg-card);
-  border-radius: 8px;
-  overflow: auto; /* Changed from hidden to allow waterfall scroll if needed */
-  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.05);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  overflow: auto;
+  box-shadow: var(--shadow-sm);
 }
 
 .file-info-cell {
@@ -298,49 +306,65 @@ const formatDate = (dateStr: string) => {
 .img-card {
   position: relative;
   background: var(--bg-card);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-color);
+  transition: transform var(--motion-base) var(--ease-out),
+              box-shadow var(--motion-base) var(--ease-out);
+  box-shadow: var(--shadow-sm);
   box-sizing: border-box;
   width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   user-select: none;
 }
 
-.img-card:hover:not(.selected) {
-  transform: translateY(-4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.img-card.selected::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border: 3px solid var(--el-color-primary);
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 15; /* Above image and overlay, below checkbox */
-  box-sizing: border-box;
+@media (hover: hover) {
+  .img-card:hover:not(.selected) {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
+  }
 }
 
 .img-card.selected {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary);
   transform: none;
-}
-
-.img-card.selected .card-checkbox {
-  background: var(--el-color-primary);
-  opacity: 1;
 }
 
 .img-card img {
   width: 100%;
+  height: auto;
   display: block;
-  object-fit: cover;
+  background: var(--bg-secondary);
+  flex: 0 0 auto;
+}
+
+.img-info {
+  padding: 8px 10px;
+  background: var(--bg-card);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.img-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.img-meta {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card-checkbox {
@@ -387,12 +411,12 @@ const formatDate = (dateStr: string) => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.3);
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.15) 45%, rgba(0, 0, 0, 0.35));
   display: flex;
   justify-content: center;
   align-items: center;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .img-card:hover .card-overlay {

@@ -32,6 +32,15 @@ def get_db():
         )
         g.db.row_factory = sqlite3.Row
 
+        # Read-friendly defaults for a local library; WAL improves concurrent read/write behavior.
+        try:
+            g.db.execute("PRAGMA journal_mode=WAL")
+            g.db.execute("PRAGMA synchronous=NORMAL")
+            g.db.execute("PRAGMA cache_size=-20000")
+            g.db.execute("PRAGMA temp_store=MEMORY")
+        except sqlite3.DatabaseError:
+            pass
+
     return g.db
 
 def close_db(e=None):
@@ -70,7 +79,16 @@ def migrate_db(db):
             db.execute("ALTER TABLE trash ADD COLUMN metadata TEXT")
             db.commit()
             print("Migration successful.")
-            
+
+        # 3. Supporting indexes for folder sorting/search-heavy queries at 100k scale.
+        db.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_images_folder_modified ON images(folder_id, modified_time);
+            CREATE INDEX IF NOT EXISTS idx_images_file_name ON images(file_name);
+            CREATE INDEX IF NOT EXISTS idx_images_file_size ON images(file_size);
+            CREATE INDEX IF NOT EXISTS idx_folders_public ON folders(is_public);
+        """)
+        db.commit()
+
     except Exception as e:
         print(f"Migration error: {e}")
 

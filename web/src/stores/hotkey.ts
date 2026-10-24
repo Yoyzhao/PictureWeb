@@ -33,7 +33,7 @@ export const useHotkeyStore = defineStore('hotkey', () => {
   const fetchHotkeys = async () => {
     loading.value = true
     try {
-      const res = await api.get('/admin/settings')
+      const res = await api.get('/settings')
       if (res.data && res.data.HOTKEYS) {
         hotkeys.value = { ...DEFAULT_HOTKEYS, ...res.data.HOTKEYS }
       }

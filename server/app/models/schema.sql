@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS folders (
 
 CREATE INDEX IF NOT EXISTS idx_folders_path ON folders(path);
 CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id);
+CREATE INDEX IF NOT EXISTS idx_folders_public ON folders(is_public);
 
 -- Images table
 CREATE TABLE IF NOT EXISTS images (
@@ -48,6 +49,9 @@ CREATE TABLE IF NOT EXISTS images (
 CREATE INDEX IF NOT EXISTS idx_images_file_path ON images(file_path);
 CREATE INDEX IF NOT EXISTS idx_images_folder_id ON images(folder_id);
 CREATE INDEX IF NOT EXISTS idx_images_modified_time ON images(modified_time);
+CREATE INDEX IF NOT EXISTS idx_images_folder_modified ON images(folder_id, modified_time);
+CREATE INDEX IF NOT EXISTS idx_images_file_name ON images(file_name);
+CREATE INDEX IF NOT EXISTS idx_images_file_size ON images(file_size);
 
 -- User Favorites table
 CREATE TABLE IF NOT EXISTS user_favorites (

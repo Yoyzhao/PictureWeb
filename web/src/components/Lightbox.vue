@@ -25,10 +25,11 @@ const hotkeyStore = useHotkeyStore()
 const hotkeys = computed(() => hotkeyStore.hotkeys)
 
 const isPreloadEnabled = ref(true)
+const imageLoaded = ref(false)
 
 const fetchPreloadSetting = async () => {
   try {
-    const res = await api.get('/admin/settings')
+    const res = await api.get('/settings')
     if (res.data && res.data.ENABLE_PRELOAD !== undefined) {
       isPreloadEnabled.value = !!res.data.ENABLE_PRELOAD
     }
@@ -40,67 +41,64 @@ const fetchPreloadSetting = async () => {
 
 const imageUrl = computed(() => props.image ? `/api/images/${props.image.id}/raw` : '')
 
-// Preload logic
+// Preload logic (bounded to avoid unbounded URL/image-cache growth while browsing).
+const MAX_PRELOADED = 120
+const MAX_RAW_PRELOAD_BYTES = 6 * 1024 * 1024
 const preloadedUrls = new Set<string>()
+const preloadTimers = new Set<number>()
 
-const preloadImage = (image: ImageItem | null, isNext: boolean) => {
+const rememberPreloaded = (url: string) => {
+  if (preloadedUrls.size >= MAX_PRELOADED) preloadedUrls.clear()
+  preloadedUrls.add(url)
+}
+
+const schedulePreload = (fn: () => void, delay: number) => {
+  const timer = window.setTimeout(() => {
+    preloadTimers.delete(timer)
+    fn()
+  }, delay)
+  preloadTimers.add(timer)
+}
+
+const clearPreloadTimers = () => {
+  preloadTimers.forEach(id => clearTimeout(id))
+  preloadTimers.clear()
+}
+
+const preloadThumbnail = (image: ImageItem | null) => {
   if (!image || !isPreloadEnabled.value) return
-  
-  // Preload medium thumbnail first (fast, reliable fallback)
   const thumbUrl = `/api/images/${image.id}/thumbnail?size=medium`
-  if (!preloadedUrls.has(thumbUrl)) {
-    const thumbImg = new Image()
-    thumbImg.src = thumbUrl
-    preloadedUrls.add(thumbUrl)
-  }
+  if (preloadedUrls.has(thumbUrl)) return
 
-  // Only preload raw image for the NEXT one to save cache/bandwidth
-  // Most users browse forward. Preloading 10MB+ for the previous image is often wasteful.
-  if (isNext) {
-    const rawUrl = `/api/images/${image.id}/raw`
-    if (!preloadedUrls.has(rawUrl)) {
-      const rawImg = new Image()
-      // Use decode() to ensure the image is ready in memory without blocking main thread
-      rawImg.src = rawUrl
-      if ('decode' in rawImg) {
-        rawImg.decode().catch(() => { /* ignore error */ })
-      }
-      preloadedUrls.add(rawUrl)
-    }
-  }
+  const thumbImg = new Image()
+  thumbImg.src = thumbUrl
+  rememberPreloaded(thumbUrl)
 }
 
 watch(() => props.image?.id, (newId) => {
-  if (newId) {
-    if (!isPreloadEnabled.value) return
+  clearPreloadTimers()
+  if (!newId || !isPreloadEnabled.value) return
 
-    // Priority 1: Next image medium thumb (immediate-ish)
-    setTimeout(() => {
-      if (props.nextImage) preloadImage(props.nextImage, true)
-    }, 300)
+  schedulePreload(() => {
+    if (props.image?.id === newId) preloadThumbnail(props.nextImage)
+  }, 200)
 
-    // Priority 2: Prev image medium thumb (short delay)
-    setTimeout(() => {
-      if (props.prevImage) preloadImage(props.prevImage, false)
-    }, 800)
-    
-    // Priority 3: Next image RAW (Delay depends on file size)
-    const nextImg = props.nextImage
-    if (nextImg) {
-      const isLarge = (nextImg.file_size || 0) > 10 * 1024 * 1024
-      const rawDelay = isLarge ? 3000 : 1200
-      
-      setTimeout(() => {
-        if (props.image?.id === newId && props.nextImage?.id === nextImg.id) {
-          const rawUrl = `/api/images/${nextImg.id}/raw`
-          if (!preloadedUrls.has(rawUrl)) {
-            const rawImg = new Image()
-            rawImg.src = rawUrl
-            preloadedUrls.add(rawUrl)
-          }
-        }
-      }, rawDelay)
-    }
+  schedulePreload(() => {
+    if (props.image?.id === newId) preloadThumbnail(props.prevImage)
+  }, 600)
+
+  // Only preload raw for reasonably sized next images; large originals hurt bandwidth and decode time.
+  const nextImg = props.nextImage
+  if (nextImg && (nextImg.file_size || 0) <= MAX_RAW_PRELOAD_BYTES) {
+    schedulePreload(() => {
+      if (props.image?.id !== newId || props.nextImage?.id !== nextImg.id) return
+      const rawUrl = `/api/images/${nextImg.id}/raw`
+      if (preloadedUrls.has(rawUrl)) return
+      const rawImg = new Image()
+      rawImg.src = rawUrl
+      if ('decode' in rawImg) rawImg.decode().catch(() => { /* ignore */ })
+      rememberPreloaded(rawUrl)
+    }, 1500)
   }
 }, { immediate: true })
 
@@ -209,7 +207,7 @@ const handleTouchEnd = (e: TouchEvent) => {
       } else if (deltaX < 0 && props.hasNext) {
         goNext()
       }
-    } 
+    }
     // Vertical swipe
     else if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > threshold) {
       if (deltaY > 0 && props.hasPrev) {
@@ -227,9 +225,15 @@ const handleTouchEnd = (e: TouchEvent) => {
   isPinching.value = false
 }
 
+const isTransforming = computed(() => (
+  scale.value !== 1 || translateX.value !== 0 || translateY.value !== 0
+))
+const isInteracting = computed(() => (
+  isPinching.value || (scale.value > 1 && isSwiping.value)
+))
+
 const imageStyle = computed(() => ({
-  transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value}) rotate(${rotate.value}deg)`,
-  transition: isPinching.value || (scale.value > 1 && isSwiping.value) ? 'none' : 'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+  transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value}) rotate(${rotate.value}deg)`
 }))
 
 // Reset transformations when image changes
@@ -238,15 +242,25 @@ watch(() => props.image?.id, () => {
   rotate.value = 0
   translateX.value = 0
   translateY.value = 0
+  imageLoaded.value = false
 })
+
+let wheelRaf = 0
+let pendingScale = 1
 
 const handleWheel = (e: WheelEvent) => {
   if (!props.visible) return
   e.preventDefault()
-  
+
+  if (!wheelRaf) pendingScale = scale.value
   const delta = e.deltaY > 0 ? -0.1 : 0.1
-  const newScale = Math.max(0.1, Math.min(5, scale.value + delta))
-  scale.value = newScale
+  pendingScale = Math.max(0.1, Math.min(5, pendingScale + delta))
+
+  if (wheelRaf) return
+  wheelRaf = requestAnimationFrame(() => {
+    scale.value = pendingScale
+    wheelRaf = 0
+  })
 }
 
 const handleRotate = () => {
@@ -268,7 +282,7 @@ const handleFavorite = async () => {
   if (props.image) {
     const isCurrentlyFavorite = props.image.is_favorite
     const isInFavoritesView = imageStore.showOnlyFavorites
-    
+
     // If we're unfavoriting while in favorites view, we need to move to the next image
     // BEFORE the store update removes this image from the list.
     if (isCurrentlyFavorite && isInFavoritesView) {
@@ -282,14 +296,14 @@ const handleFavorite = async () => {
       // Wait for the transition to start
       await nextTick()
     }
-    
+
     await imageStore.toggleFavorite(props.image)
   }
 }
 
 const handleDelete = async () => {
   if (!props.image) return
-  
+
   try {
     await ElMessageBox.confirm(
       '确定要删除这张图片吗？',
@@ -300,12 +314,12 @@ const handleDelete = async () => {
         type: 'warning',
       }
     )
-    
+
     const res = await imageStore.batchDeleteImages([props.image.id])
     if (res.data.success) {
       const deletedId = props.image.id
       ElMessage.success('删除成功')
-      
+
       // 1. Move to next/prev image first to keep the lightbox open
       if (props.hasNext) {
         goNext()
@@ -314,10 +328,10 @@ const handleDelete = async () => {
       } else {
         emit('close')
       }
-      
+
       // 2. Remove from local store silently instead of full refresh
       imageStore.removeImageLocally(deletedId)
-      
+
       // 3. Optional: Trigger a silent load for more images if list is getting short
       if (imageStore.images.length < 20 && imageStore.total > imageStore.images.length) {
         imageStore.fetchImages()
@@ -332,7 +346,7 @@ const handleDelete = async () => {
 
 const handleRename = async () => {
   if (!props.image) return
-  
+
   try {
     const result = await ElMessageBox.prompt(
       '请输入新的文件名',
@@ -346,7 +360,7 @@ const handleRename = async () => {
       }
     )
     const newName = (result as any).value
-    
+
     if (newName && newName !== props.image.file_name) {
       const res = await imageStore.renameImage(props.image.id, newName)
       if (res.success) {
@@ -360,7 +374,7 @@ const handleRename = async () => {
 
 const handleKeydown = (e: KeyboardEvent) => {
   if (!props.visible) return
-  
+
   const key = e.key
   const hk = hotkeys.value
 
@@ -391,22 +405,27 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  clearPreloadTimers()
+  if (wheelRaf) cancelAnimationFrame(wheelRaf)
 })
 </script>
 
 <template>
-  <div 
-    v-if="visible" 
-    class="lightbox" 
+  <div
+    v-if="visible"
+    class="lightbox"
     :class="{ 'ui-visible': showUI, 'ui-hidden': !showUI }"
-    @click="toggleUI" 
+    role="dialog"
+    aria-modal="true"
+    aria-label="图片预览"
+    @click="toggleUI"
     @wheel="handleWheel"
     @touchstart="handleTouchStart"
     @touchmove="handleTouchMove"
     @touchend="handleTouchEnd"
   >
     <div class="lightbox-overlay"></div>
-    
+
     <div class="image-counter" v-if="currentIndex !== undefined && totalImages !== undefined">
       {{ currentIndex + 1 }} / {{ totalImages }}
     </div>
@@ -419,35 +438,47 @@ onUnmounted(() => {
     <div class="lightbox-content">
       <transition :name="transitionName">
         <div :key="imageUrl" class="image-wrapper">
-          <img :src="imageUrl" :alt="image?.file_name" :style="imageStyle" @click.stop="toggleUI" draggable="false" />
+          <img
+            :src="imageUrl"
+            :alt="image?.file_name"
+            :style="imageStyle"
+            decoding="async"
+            fetchpriority="high"
+            :class="{ 'is-loaded': imageLoaded, 'is-transforming': isTransforming, 'is-interacting': isInteracting }"
+            @load="imageLoaded = true"
+            @error="imageLoaded = true"
+            @click.stop="toggleUI"
+            draggable="false"
+          />
         </div>
       </transition>
       <div class="lightbox-controls" @click.stop>
-        <button v-if="hasPrev" class="control-btn prev-btn" @click.stop="goPrev" @touchstart.stop @touchend.stop>
+        <button v-if="hasPrev" class="control-btn prev-btn" aria-label="上一张" @click.stop="goPrev" @touchstart.stop @touchend.stop>
           <el-icon><ArrowLeft /></el-icon>
         </button>
-        <button v-if="hasNext" class="control-btn next-btn" @click.stop="goNext" @touchstart.stop @touchend.stop>
+        <button v-if="hasNext" class="control-btn next-btn" aria-label="下一张" @click.stop="goNext" @touchstart.stop @touchend.stop>
           <el-icon><ArrowRight /></el-icon>
         </button>
       </div>
-      
+
       <div class="lightbox-toolbar" @touchstart.stop @touchend.stop @click.stop>
-        <button title="旋转" @click="handleRotate"><el-icon><RefreshRight /></el-icon></button>
-        <button title="重置" @click="handleReset"><el-icon><FullScreen /></el-icon></button>
-        <button title="裁剪" class="disabled"><el-icon><Crop /></el-icon></button>
-        <button title="重命名" @click="handleRename"><el-icon><Edit /></el-icon></button>
-        <button 
-          title="收藏" 
-          class="btn-fav" 
-          :class="{ active: image?.is_favorite }" 
+        <button title="旋转" aria-label="旋转" @click="handleRotate"><el-icon><RefreshRight /></el-icon></button>
+        <button title="重置" aria-label="重置视图" @click="handleReset"><el-icon><FullScreen /></el-icon></button>
+        <button title="裁剪（开发中）" aria-label="裁剪（开发中）" class="disabled"><el-icon><Crop /></el-icon></button>
+        <button title="重命名" aria-label="重命名" @click="handleRename"><el-icon><Edit /></el-icon></button>
+        <button
+          title="收藏"
+          aria-label="收藏"
+          class="btn-fav"
+          :class="{ active: image?.is_favorite }"
           @click="handleFavorite"
         >
           <el-icon><Star /></el-icon>
         </button>
-        <button title="删除" class="btn-delete" @click="handleDelete">
+        <button title="删除" aria-label="删除" class="btn-delete" @click="handleDelete">
           <el-icon><Delete /></el-icon>
         </button>
-        <button title="关闭" class="close-btn" @click="emit('close')"><el-icon><Close /></el-icon></button>
+        <button title="关闭" aria-label="关闭" class="close-btn" @click="emit('close')"><el-icon><Close /></el-icon></button>
       </div>
 
       <div class="image-meta" v-if="image" @touchstart.stop @touchend.stop @click.stop>
@@ -472,6 +503,7 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
+    overscroll-behavior: contain;
 }
 
 .lightbox-overlay {
@@ -480,7 +512,7 @@ onUnmounted(() => {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0,0,0,0.95);
+    background: radial-gradient(circle at 50% 32%, rgba(24, 26, 30, 0.94), rgba(0, 0, 0, 0.98));
 }
 
 .lightbox-content {
@@ -502,7 +534,6 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
-    will-change: transform, opacity;
 }
 
 .lightbox-content img {
@@ -510,15 +541,34 @@ onUnmounted(() => {
     max-height: 100%;
     object-fit: contain;
     box-shadow: 0 0 40px rgba(0,0,0,0.5);
-    will-change: transform;
     user-select: none;
     -webkit-user-drag: none;
+    opacity: 0;
+    transition: opacity 220ms ease, transform 180ms var(--ease-out);
+}
+
+.lightbox-content img.is-loaded {
+    opacity: 1;
+}
+
+.lightbox-content img.is-transforming {
+    will-change: transform;
+}
+
+.lightbox-content img.is-interacting {
+    transition: none;
 }
 
 /* 图片切换动画 - 向左滑动 (下一页) */
 .slide-left-enter-active,
-.slide-left-leave-active {
-    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+.slide-left-leave-active,
+.slide-right-enter-active,
+.slide-right-leave-active,
+.slide-up-enter-active,
+.slide-up-leave-active,
+.slide-down-enter-active,
+.slide-down-leave-active {
+    transition: transform 240ms var(--ease-out), opacity 200ms ease;
 }
 .slide-left-enter-from {
     opacity: 0;
@@ -530,10 +580,6 @@ onUnmounted(() => {
 }
 
 /* 图片切换动画 - 向右滑动 (上一页) */
-.slide-right-enter-active,
-.slide-right-leave-active {
-    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
 .slide-right-enter-from {
     opacity: 0;
     transform: translateX(-100px);
@@ -544,10 +590,6 @@ onUnmounted(() => {
 }
 
 /* 图片切换动画 - 向上滑动 (下一页) */
-.slide-up-enter-active,
-.slide-up-leave-active {
-    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
 .slide-up-enter-from {
     opacity: 0;
     transform: translateY(100px);
@@ -558,10 +600,6 @@ onUnmounted(() => {
 }
 
 /* 图片切换动画 - 向下滑动 (上一页) */
-.slide-down-enter-active,
-.slide-down-leave-active {
-    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
 .slide-down-enter-from {
     opacity: 0;
     transform: translateY(-100px);
@@ -591,7 +629,7 @@ onUnmounted(() => {
     /* Default hidden */
     opacity: 0;
     visibility: hidden;
-    transition: all 0.3s ease;
+    transition: opacity 200ms ease, background-color var(--motion-fast) var(--ease-out), transform 200ms var(--ease-out);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
@@ -633,7 +671,7 @@ onUnmounted(() => {
     user-select: none;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.3s ease;
+    transition: opacity 200ms ease, transform 200ms var(--ease-out);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
@@ -672,41 +710,50 @@ onUnmounted(() => {
     top: 20px;
     right: 20px;
     display: flex;
-    gap: 12px;
+    gap: 4px;
+    padding: 6px;
+    background: rgba(15, 18, 22, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    backdrop-filter: blur(14px);
     opacity: 0;
     visibility: hidden;
-    transition: all 0.3s ease;
+    transition: opacity 200ms ease, transform 200ms var(--ease-out);
+    transform: translateY(-6px);
+}
+
+.lightbox.ui-visible .lightbox-toolbar,
+.lightbox:hover .lightbox-toolbar {
+    transform: none;
 }
 
 .lightbox-toolbar button {
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: white;
-    width: 44px;
-    height: 44px;
-    border-radius: 8px;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.86);
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 18px;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out);
 }
 
 .lightbox-toolbar button:hover {
-    background: rgba(0, 0, 0, 0.7);
-    border-color: var(--primary);
-    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
 }
 
 .lightbox-toolbar .btn-fav.active {
-    color: #ff9800;
+    color: #ffb74d;
 }
 
 .lightbox-toolbar .btn-delete:hover {
-    background: rgba(245, 108, 108, 0.2);
+    background: rgba(245, 108, 108, 0.18);
     color: #f56c6c;
 }
 
@@ -733,7 +780,7 @@ onUnmounted(() => {
     z-index: 1010;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.3s ease;
+    transition: opacity 200ms ease, transform 200ms var(--ease-out);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 

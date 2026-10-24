@@ -67,9 +67,10 @@
 | 文件夹 | `routes/folder.py` | `/api/folders` | 列表（按角色过滤）、新增并异步扫描、PATCH、删除（可选硬删除到回收站）、重新扫描 |
 | 图片 | `routes/image.py` | `/api/images` | 分页列表/详情、重命名、收藏切换、缩略图/原图/下载、批量移动/删除、回收站列表/缩略图/恢复/清空 |
 | 管理 | `routes/admin.py` | `/api/admin` | 全模块管理员校验；缓存统计/清理、用户 CRUD、文件夹列表/删除、权限 CRUD、系统设置读写 |
+| 公开设置 | `routes/settings.py` | `/api/settings` | 匿名可读；仅返回 `HOTKEYS` 与 `ENABLE_PRELOAD`，供前端快捷键/预加载使用 |
 | 健康检查 | `app/__init__.py` | `/api/health` | 返回 `{"status":"ok"}` |
 
-> `docs/tech/PictureWeb技术架构文档.md` 第 4 节的接口清单早于实现，缺少回收站、管理、缩略图/原图/下载、批量操作等接口；以代码与本表为准。涉及接口的下一轮迭代前补建 `docs/tech/api-contract.md`。
+> 架构文档第 4 节已按当前实现更新；独立 `docs/tech/api-contract.md` 尚未建立，涉及复杂接口的迭代前按需补建。
 
 ## 4. 启动与构建命令
 
@@ -150,6 +151,7 @@
 ## 9. Agent 使用约定
 
 - 若不了解系统架构或运行方式，先读取本文件，再按需读取 `PictureWeb技术架构文档.md`
+- 前端渲染性能、虚拟列表与 10 万级优化方案见 `docs/tech/features/frontend-performance-前端渲染性能与UI优化.md`
 - 本文件与代码冲突时，以代码与实测为准，并同步修正本文件
 - 每次技术栈、版本、端口、数据库、配置键或鉴权方案发生变化时同步更新本文件
 - 禁止在未授权情况下读写生产部署目录或生产数据库；本地验证使用测试库与只读接口
