@@ -2,11 +2,16 @@ import os
 import yaml
 from flask import Flask, send_from_directory
 from flask_cors import CORS
+from dotenv import load_dotenv
 
 def create_app(test_config=None):
     # create and configure the app
-    # Static folder for frontend build
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+
+    # Secrets and instance-specific settings come from .env (never from tracked config).
+    load_dotenv(os.path.join(project_root, '.env'))
+
+    # Static folder for frontend build
     static_folder = os.path.join(project_root, 'web', 'dist')
     
     app = Flask(__name__, 
@@ -26,7 +31,22 @@ def create_app(test_config=None):
                     config[key] = os.path.abspath(os.path.join(project_root, config[key]))
             
             app.config.update(config)
-    
+
+    # SECRET_KEY is mandatory: it signs login tokens and Flask sessions.
+    secret_key = os.environ.get('SECRET_KEY')
+    if not secret_key:
+        raise RuntimeError(
+            'SECRET_KEY is not configured. Copy .env.example to .env and set SECRET_KEY.'
+        )
+    app.config['SECRET_KEY'] = secret_key
+    app.config['APP_ENV'] = os.environ.get('APP_ENV', 'dev')
+    app.config['TOKEN_MAX_AGE_SECONDS'] = int(os.environ.get('TOKEN_MAX_AGE_SECONDS', '604800'))
+    app.config['DEFAULT_ADMIN_USERNAME'] = os.environ.get('DEFAULT_ADMIN_USERNAME', '').strip()
+    app.config['DEFAULT_ADMIN_PASSWORD'] = os.environ.get('DEFAULT_ADMIN_PASSWORD', '')
+
+    if test_config:
+        app.config.update(test_config)
+
     CORS(app) # Enable CORS for all routes
 
     # Initialize database

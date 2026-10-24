@@ -1,136 +1,148 @@
 # Windows 正式环境部署说明
 
-本文档详细说明了 PictureWeb 系统在 Windows 环境下的生产部署流程。
+本文档说明 PicGallery 在 Windows 环境下的生产部署流程。生产环境使用**独立部署副本**，不要直接用仓库开发配置运行生产。
 
 ## 1. 环境准备
 
-在开始部署之前，请确保系统中已安装以下软件：
+- **Python 3.12**（本机为 `D:\Python\Python312\python.exe`；3.13 也可用，但项目依赖按 3.12 验证）
+- **Node.js v18+ & npm**
+- **PowerShell 7**
+- 可选：**NSSM**（注册 Windows 服务）
 
-- **Python 3.10+**: [下载地址](https://www.python.org/downloads/windows/)
-- **Node.js v18+ & npm**: [下载地址](https://nodejs.org/)
-- **PowerShell 7**: 推荐使用 PowerShell 7 以获得最佳命令支持。
-
-### 1.1 配置加速镜像 (推荐)
-
-为了加快依赖安装速度，建议配置国内镜像源：
+### 1.1 配置加速镜像（推荐）
 
 ```powershell
-# pip 配置阿里加速镜像
 pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 pip config set global.trusted-host mirrors.aliyun.com
-
-# npm 配置淘宝加速镜像
 npm config set registry https://registry.npmmirror.com
 ```
 
-## 2. 前端构建 (Web)
+## 2. 部署副本与目录
 
-1. 进入 `web` 目录：
-   ```powershell
-   cd web
-   ```
-2. 安装依赖：
-   ```powershell
-   npm install
-   ```
-3. 执行构建：
-   ```powershell
-   npm run build
-   ```
-   构建完成后，会在 `web/dist` 目录下生成静态文件。
+建议将代码部署到独立目录（本机现网为 `D:\Workspace\_deploy\PicGallery`），与开发仓库分离：
 
-## 3. 后端环境配置 (Server)
+```
+D:\Workspace\_deploy\PicGallery\
+├── server\                 # Flask 后端 + server\venv
+├── web\                    # 前端源码 + dist 构建产物
+├── data\
+│   ├── database.db         # 生产数据库
+│   └── cache\              # 生产缩略图缓存（也可指向独立磁盘）
+├── logs\                   # 生产日志
+├── config.yaml             # 生产配置（端口 5000、生产库/缓存/回收站路径）
+├── .env                    # 生产密钥与管理员初始账号（不提交 Git）
+└── prod_run.py
+```
 
-1. 进入项目根目录：
-   ```powershell
-   cd ..
-   ```
-2. 创建并激活 Python 虚拟环境：
-   ```powershell
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
-   ```
-3. 安装后端依赖：
-   ```powershell
-   pip install -r server/requirements.txt
-   ```
-4. 安装生产级 WSGI 服务器 (Waitress)：
-   ```powershell
-   pip install waitress
-   ```
+## 3. 前端构建 (Web)
 
-## 4. 系统配置
+```powershell
+cd web
+npm install
+npm run build
+```
 
-在项目根目录下编辑 `config.yaml` 文件，根据实际环境调整配置：
+构建产物输出到 `web/dist`，由 Flask 直接托管。
+
+## 4. 后端环境与依赖
+
+```powershell
+cd D:\Workspace\_deploy\PicGallery
+py -3.12 -m venv server\venv
+.\server\venv\Scripts\Activate.ps1
+.\server\venv\Scripts\python.exe -m pip install --upgrade pip
+.\server\venv\Scripts\python.exe -m pip install -r server\requirements.txt
+```
+
+依赖包含 `python-dotenv`、`itsdangerous`（Token 签名）与 `waitress`（生产 WSGI）。
+
+## 5. 生产配置
+
+### 5.1 `config.yaml`（非敏感配置）
 
 ```yaml
-SERVER_PORT: 5000               # 服务端口
-DB_PATH: "data/database.db"     # 数据库存放路径
-CACHE_DIR: "data/cache"         # 缩略图缓存存放路径
-LOG_LEVEL: "INFO"               # 日志级别 (DEBUG, INFO, ERROR)
-ANONYMOUS_ACCESS: true          # 是否允许匿名访问
-THUMBNAIL_QUALITY: 80           # 缩略图质量 (1-100)
-SCAN_RECURSIVE: true            # 是否递归扫描文件夹
+SERVER_PORT: 5000
+DB_PATH: "data/database.db"
+CACHE_DIR: "data/cache"
+TRASH_DIR: "data/trash"
+LOG_LEVEL: "WARNING"
+ANONYMOUS_ACCESS: true
+THUMBNAIL_QUALITY: 95
+SCAN_RECURSIVE: true
 SCAN_EXTENSIONS: ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff"
+ENABLE_PRELOAD: true
+HOTKEYS:
+  PREV: "ArrowLeft"
+  NEXT: "ArrowRight"
+  CLOSE: "Escape"
+  FAVORITE: "f"
+  DELETE: "Delete"
+  ROTATE: "r"
+  ZOOM_IN: "ArrowUp"
+  ZOOM_OUT: "ArrowDown"
+  RESET: "h"
 ```
 
-**注意**：确保 `data` 目录及其子目录对运行程序的用户具有读写权限。
+> 仓库根目录的 `config.yaml` 是开发/测试配置（端口 5001、测试库 `data/db/database.db`），不得直接用于生产。
 
-## 5. 启动服务
+### 5.2 `.env`（密钥与管理员初始账号）
 
-### 5.1 生产环境运行 (推荐)
+从 `.env.example` 复制并填写，**不要提交到 Git**：
 
-在生产环境下，不建议使用 Flask 自带的开发服务器。建议编写一个简单的启动脚本 `prod_run.py`：
-
-```python
-import os
-import sys
-from waitress import serve
-
-# 确保在项目根目录下运行
-project_root = os.path.dirname(os.path.abspath(__file__))
-os.chdir(project_root)
-
-# 将 server 目录添加到 Python 路径，以便 'from app import ...' 能够工作
-sys.path.insert(0, os.path.join(project_root, 'server'))
-
-from app import create_app
-
-app = create_app()
-
-if __name__ == '__main__':
-    port = app.config.get('SERVER_PORT', 5000)
-    print(f"Starting production server on http://localhost:{port}")
-    serve(app, host='0.0.0.0', port=port)
+```ini
+APP_ENV=prd
+SECRET_KEY=<生产独立随机密钥>
+TOKEN_MAX_AGE_SECONDS=604800
+DEFAULT_ADMIN_USERNAME=<管理员账号>
+DEFAULT_ADMIN_PASSWORD=<强密码>
 ```
 
-运行启动脚本：
+- `SECRET_KEY` 缺失时后端会拒绝启动；生产密钥必须与开发/测试不同
+- 已有生产库不会被启动流程覆盖管理员密码；如需同步 `.env` 中的新密码，执行：
+  ```powershell
+  .\server\venv\Scripts\python.exe scripts\sql-script\init_db.py --reset-admin-password
+  ```
+
+## 6. 初始化数据库
+
 ```powershell
+.\server\venv\Scripts\python.exe scripts\sql-script\init_db.py
+```
+
+## 7. 启动服务
+
+### 7.1 直接运行（推荐）
+
+```powershell
+cd D:\Workspace\_deploy\PicGallery
 python prod_run.py
 ```
 
-### 5.2 作为 Windows 服务运行
+服务监听 `http://0.0.0.0:5000`，由 Waitress 托管。
 
-可以使用 `NSSM` (Non-Sucking Service Manager) 将程序注册为 Windows 服务，实现开机自启和后台运行。
+### 7.2 作为 Windows 服务运行
 
-1. 下载 [NSSM](https://nssm.cc/download)。
-2. 执行命令安装服务：
+1. 下载 NSSM：https://nssm.cc/download
+2. 安装服务：
    ```powershell
-   nssm install PictureWeb
+   nssm install PicGallery
    ```
-3. 在弹出的窗口中配置：
-   - **Path**: `D:\Workspace\PicGallery\venv\Scripts\python.exe`
-   - **Startup directory**: `D:\Workspace\PicGallery`
+3. 配置：
+   - **Path**: `D:\Workspace\_deploy\PicGallery\server\venv\Scripts\python.exe`
+   - **Startup directory**: `D:\Workspace\_deploy\PicGallery`
    - **Arguments**: `prod_run.py`
 
-## 6. 维护与备份
+## 8. 维护与备份
 
-- **日志查看**：系统运行日志将根据 `LOG_LEVEL` 输出到终端或配置的日志文件中。
-- **数据库备份**：定期备份 `data/database.db` 文件。
-- **缓存清理**：如果磁盘空间不足，可以安全删除 `data/cache` 目录下的内容，系统会在需要时重新生成。
+- **数据库备份**：定期备份 `data\database.db`
+- **缓存清理**：可安全删除 `data\cache` 内容，系统按需重新生成
+- **日志**：查看部署副本 `logs\` 目录；日志按启动时间滚动
+- **配置变更**：修改 `config.yaml` 后重启服务；修改 `.env` 后必须重启（密钥在启动时加载）
 
-## 7. 常见问题 (FAQ)
+## 9. 常见问题
 
-- **端口冲突**：如果 5000 端口被占用，请在 `config.yaml` 中修改 `SERVER_PORT`。
-- **路径问题**：确保 `DB_PATH` 和 `CACHE_DIR` 使用相对路径或合法的 Windows 绝对路径。
-- **权限不足**：运行 PowerShell 时建议使用管理员权限，特别是在执行扫描任务或删除操作时。
+- **启动报 `SECRET_KEY is not configured`**：部署目录缺少 `.env` 或未填写 `SECRET_KEY`
+- **端口冲突**：修改生产 `config.yaml` 的 `SERVER_PORT`；先确认占用进程归属，不要终止无关进程
+- **登录后立即失效**：`SECRET_KEY` 变更会使旧 Token 失效，重新登录即可（前端会自动清理失效凭证）
+- **路径问题**：`DB_PATH`、`CACHE_DIR`、`TRASH_DIR` 可使用相对部署根目录的路径或 Windows 绝对路径
+- **权限不足**：扫描与删除操作需要文件系统读写权限；建议以具备权限的账号运行服务

@@ -14,6 +14,21 @@ api.interceptors.request.use(config => {
   return config
 })
 
+// Clear stale credentials when the signed token is rejected (e.g. after SECRET_KEY rotation).
+// Login failures are excluded so a wrong password does not wipe the current session.
+api.interceptors.response.use(
+  response => response,
+  error => {
+    const url = String(error.config?.url || '')
+    if (error.response?.status === 401 && !url.includes('/auth/login')) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+    }
+    return Promise.reject(error)
+  }
+)
+
 export const getFolders = () => api.get('/folders')
 export const addFolder = (path: string, name?: string) => api.post('/folders', { path, name })
 export const scanFolder = (id: number) => api.post(`/folders/${id}/scan`)

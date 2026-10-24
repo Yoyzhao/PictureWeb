@@ -1,14 +1,19 @@
-import sqlite3
 import os
+import sqlite3
 import yaml
 
-# Read config to get DB_PATH
-config_path = 'config.yaml'
-db_path = 'data/picgallery.db' # default
+# scripts/sql-script/normalize_db.py -> project root
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+config_path = os.path.join(PROJECT_ROOT, 'config.yaml')
+db_path = os.path.join(PROJECT_ROOT, 'data', 'db', 'database.db')
+
 if os.path.exists(config_path):
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
         db_path = config.get('DB_PATH', db_path)
+
+if not os.path.isabs(db_path):
+    db_path = os.path.abspath(os.path.join(PROJECT_ROOT, db_path))
 
 print(f"Normalizing database at: {db_path}")
 db = sqlite3.connect(db_path)

@@ -86,31 +86,66 @@ def init_db():
     # Run migrations for existing database
     migrate_db(db)
     
-    # Check if admin user exists, if not create one
-    # This is a basic check to ensure we have at least one user
+    # Check if admin user exists, if not create one from .env values.
     try:
-        cur = db.execute("SELECT * FROM users WHERE username = ?", ('admin',))
-        if cur.fetchone() is None:
-            # Default password for admin: admin123 (In production, use hashed passwords!)
-            # For simplicity in prototype, we store plain text or simple hash
-            # Ideally use werkzeug.security.generate_password_hash
-            from werkzeug.security import generate_password_hash
-            db.execute(
-                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-                ('admin', generate_password_hash('admin123'), 'admin')
-            )
-            
-            # Create guest user if anonymous access is enabled
-            if current_app.config.get('ANONYMOUS_ACCESS', True):
+        admin_username = (current_app.config.get('DEFAULT_ADMIN_USERNAME') or '').strip()
+        admin_password = current_app.config.get('DEFAULT_ADMIN_PASSWORD') or ''
+
+        if admin_username and admin_password:
+            cur = db.execute("SELECT 1 FROM users WHERE username = ?", (admin_username,))
+            if cur.fetchone() is None:
+                from werkzeug.security import generate_password_hash
+                db.execute(
+                    "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                    (admin_username, generate_password_hash(admin_password), 'admin')
+                )
+                print(f"Initialized default admin user: {admin_username}")
+        else:
+            print("DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD not configured; skipped default admin creation.")
+
+        # Guest is a system account for anonymous read access; create it independently.
+        if current_app.config.get('ANONYMOUS_ACCESS', True):
+            cur = db.execute("SELECT 1 FROM users WHERE username = 'guest'")
+            if cur.fetchone() is None:
                 db.execute(
                     "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
                     ('guest', '', 'guest')
                 )
-                
-            db.commit()
-            print("Initialized database with default users.")
+                print("Initialized guest user.")
+
+        db.commit()
     except Exception as e:
         print(f"Error initializing default data: {e}")
+
+
+def reset_admin_password():
+    """Sync the configured admin password from .env into the database."""
+    db = get_db()
+    username = (current_app.config.get('DEFAULT_ADMIN_USERNAME') or '').strip()
+    password = current_app.config.get('DEFAULT_ADMIN_PASSWORD') or ''
+
+    if not username or not password:
+        raise RuntimeError(
+            'DEFAULT_ADMIN_USERNAME and DEFAULT_ADMIN_PASSWORD must be set in .env before resetting the admin password.'
+        )
+
+    from werkzeug.security import generate_password_hash
+    password_hash = generate_password_hash(password)
+    user = db.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+
+    if user:
+        db.execute(
+            "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (password_hash, user['id'])
+        )
+    else:
+        db.execute(
+            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+            (username, password_hash, 'admin')
+        )
+
+    db.commit()
+    return username
 
 def init_app(app):
     app.teardown_appcontext(close_db)

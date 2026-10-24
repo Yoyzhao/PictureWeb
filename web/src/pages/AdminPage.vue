@@ -4,8 +4,10 @@ import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Folder, Setting, Plus, Delete, Edit, Warning, Pointer, RefreshLeft } from '@element-plus/icons-vue'
 import { useHotkeyStore, DEFAULT_HOTKEYS } from '@/stores/hotkey'
+import { useAuthStore } from '@/stores/auth'
 
 const hotkeyStore = useHotkeyStore()
+const authStore = useAuthStore()
 const hotkeys = computed(() => hotkeyStore.hotkeys)
 const recordingHotkey = ref<string | null>(null)
 const hotkeyLabels: Record<string, string> = {
@@ -48,6 +50,7 @@ const resetHotkeys = () => {
 
 const activeTab = ref('users')
 const users = ref<any[]>([])
+const adminCount = computed(() => users.value.filter((u: any) => u.role === 'admin').length)
 const permissions = ref<any[]>([])
 const folders = ref<any[]>([])
 const settings = ref<any>({})
@@ -515,7 +518,7 @@ const saveSettings = async () => {
               <template #default="{ row }">
                 <el-button-group>
                   <el-button :icon="Edit" size="small" @click="handleEditUser(row)" />
-                  <el-button :icon="Delete" size="small" type="danger" @click="deleteUser(row.id)" :disabled="row.username === 'admin' || row.username === 'guest'" />
+                  <el-button :icon="Delete" size="small" type="danger" @click="deleteUser(row.id)" :disabled="row.username === 'guest' || row.username === authStore.user?.username || (row.role === 'admin' && adminCount <= 1)" />
                 </el-button-group>
               </template>
             </el-table-column>

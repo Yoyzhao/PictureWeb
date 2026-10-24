@@ -146,14 +146,24 @@ def update_user(id):
 @bp.route('/users/<int:id>', methods=['DELETE'])
 def delete_user(id):
     db = get_db()
-    # Don't allow deleting the last admin or the guest user
+    # Don't allow deleting the configured admin, the guest user, or the last admin.
     user = db.execute("SELECT username, role FROM users WHERE id = ?", (id,)).fetchone()
     if not user:
         return jsonify({'error': 'User not found'}), 404
-        
-    if user['username'] == 'admin' or user['username'] == 'guest':
+
+    protected_usernames = {'guest'}
+    configured_admin = (current_app.config.get('DEFAULT_ADMIN_USERNAME') or '').strip()
+    if configured_admin:
+        protected_usernames.add(configured_admin)
+
+    if user['username'] in protected_usernames:
         return jsonify({'error': 'Cannot delete system users'}), 400
-        
+
+    if user['role'] == 'admin':
+        admin_count = db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0]
+        if admin_count <= 1:
+            return jsonify({'error': 'Cannot delete the last admin user'}), 400
+
     db.execute("DELETE FROM users WHERE id = ?", (id,))
     db.commit()
     return jsonify({'success': True})

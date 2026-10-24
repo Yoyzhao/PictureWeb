@@ -186,9 +186,6 @@ const handleAddFolder = async () => {
         <el-form-item label="密码">
           <el-input v-model="loginForm.password" type="password" placeholder="请输入密码" show-password />
         </el-form-item>
-        <div style="font-size: 12px; color: #999; margin-left: 60px;">
-          提示: admin / admin123
-        </div>
       </el-form>
       <template #footer>
         <span class="dialog-footer">

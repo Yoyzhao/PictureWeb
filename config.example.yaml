@@ -1,0 +1,26 @@
+# PicGallery 开发/测试配置示例
+# 复制为 config.yaml 后按本机环境调整；生产环境使用部署副本中的独立 config.yaml。
+# 密钥与管理员初始账号不在此处配置，见 .env.example。
+
+SERVER_PORT: 5001               # 后端服务端口（开发）
+DB_PATH: "data/db/database.db"  # 测试数据库路径
+CACHE_DIR: "data/cache"         # 缩略图缓存目录
+TRASH_DIR: "data/trash"         # 应用内回收站目录
+LOG_LEVEL: "INFO"               # 日志级别 (DEBUG, INFO, ERROR)
+ANONYMOUS_ACCESS: true          # 是否允许匿名访问公开文件夹
+THUMBNAIL_QUALITY: 90           # 缩略图质量 (1-100)
+SCAN_RECURSIVE: true            # 是否递归扫描文件夹
+SCAN_EXTENSIONS: ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff" # 扫描的图片后缀名
+ENABLE_PRELOAD: true            # Lightbox 原图预加载
+
+# 快捷键设置
+HOTKEYS:
+  PREV: "ArrowLeft"      # 上一张
+  NEXT: "ArrowRight"     # 下一张
+  CLOSE: "Escape"        # 关闭视图
+  FAVORITE: "f"          # 收藏/取消收藏
+  DELETE: "Delete"       # 删除图片
+  ROTATE: "r"            # 旋转图片
+  ZOOM_IN: "ArrowUp"     # 放大
+  ZOOM_OUT: "ArrowDown"  # 缩小
+  RESET: "h"             # 重置视图

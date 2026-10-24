@@ -15,11 +15,20 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('user', JSON.stringify(user.value))
   }
 
-  const logout = () => {
+  const reset = () => {
     user.value = null
     token.value = null
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+  }
+
+  const logout = () => {
+    reset()
+  }
+
+  // The API layer dispatches this event when a signed token is rejected.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('auth:unauthorized', reset)
   }
 
   // Initialize from localStorage
