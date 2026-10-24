@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import api from '@/api'
-import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading } from '@element-plus/icons-vue'
+import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading, Rank, InfoFilled, CollectionTag } from '@element-plus/icons-vue'
 import type { Image as ImageItem } from '@/stores/image'
 import { useImageStore } from '@/stores/image'
+import { useFolderStore } from '@/stores/folder'
+import { useAuthStore } from '@/stores/auth'
+import { useBookmarkStore } from '@/stores/bookmark'
 import { useHotkeyStore } from '@/stores/hotkey'
 import { ElMessageBox, ElMessage } from 'element-plus'
+import ImageInfoDialog from './ImageInfoDialog.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -21,8 +25,20 @@ const props = defineProps<{
 
 const emit = defineEmits(['close', 'prev', 'next'])
 const imageStore = useImageStore()
+const folderStore = useFolderStore()
+const authStore = useAuthStore()
+const bookmarkStore = useBookmarkStore()
 const hotkeyStore = useHotkeyStore()
 const hotkeys = computed(() => hotkeyStore.hotkeys)
+const canEdit = computed(() => !!authStore.user && authStore.user.role !== 'guest')
+const isImageBookmarked = computed(() =>
+  !!props.image && bookmarkStore.bookmarkedImageIds.has(props.image.id)
+)
+
+const showMoveDialog = ref(false)
+const targetFolderId = ref<number | null>(null)
+const isMoving = ref(false)
+const showInfoDialog = ref(false)
 
 const isPreloadEnabled = ref(true)
 const imageLoaded = ref(false)
@@ -372,8 +388,74 @@ const handleRename = async () => {
   }
 }
 
+const handleSaveBookmark = () => {
+  if (!props.image) return
+  bookmarkStore.toggleAt(props.image.id)
+}
+
+const openMoveDialog = () => {
+  if (!props.image) return
+  if (folderStore.folders.length === 0) folderStore.fetchFolders()
+  targetFolderId.value = null
+  showMoveDialog.value = true
+}
+
+const handleMove = async () => {
+  if (!props.image) return
+  if (!targetFolderId.value) {
+    ElMessage.warning('请选择目标文件夹')
+    return
+  }
+
+  const imageId = props.image.id
+  const targetId = targetFolderId.value
+  if (targetId === props.image.folder_id) {
+    ElMessage.warning('图片已在该文件夹中')
+    return
+  }
+
+  isMoving.value = true
+  try {
+    const res = await imageStore.batchMoveImages([imageId], targetId)
+    const body = res.data
+    const movedIds: number[] = body.moved_ids || []
+    const errors: string[] = body.errors || []
+
+    if (movedIds.includes(imageId)) {
+      ElMessage.success('移动成功')
+      showMoveDialog.value = false
+      targetFolderId.value = null
+
+      // If the current view is a concrete folder the image no longer belongs to,
+      // navigate away first and then drop it from the list (same flow as delete).
+      if (folderStore.currentFolderId !== undefined && folderStore.currentFolderId !== targetId) {
+        if (props.hasNext) {
+          goNext()
+        } else if (props.hasPrev) {
+          goPrev()
+        } else {
+          emit('close')
+        }
+        imageStore.removeImageLocally(imageId)
+      } else {
+        // Keep the item in "all photos"/favorites views, but refresh its folder/path/name
+        // so the next move dialog excludes the folder it now belongs to.
+        await imageStore.refreshImage(imageId)
+      }
+    } else if (errors.length > 0) {
+      ElMessage.error('移动失败: ' + errors[0])
+    }
+  } catch (error: any) {
+    ElMessage.error('移动失败: ' + (error.response?.data?.error || error.message))
+  } finally {
+    isMoving.value = false
+  }
+}
+
 const handleKeydown = (e: KeyboardEvent) => {
   if (!props.visible) return
+  // Dialogs own the keyboard while they are open; shortcuts must not mutate the gallery underneath.
+  if (showMoveDialog.value || showInfoDialog.value) return
 
   const key = e.key
   const hk = hotkeys.value
@@ -466,6 +548,7 @@ onUnmounted(() => {
         <button title="重置" aria-label="重置视图" @click="handleReset"><el-icon><FullScreen /></el-icon></button>
         <button title="裁剪（开发中）" aria-label="裁剪（开发中）" class="disabled"><el-icon><Crop /></el-icon></button>
         <button title="重命名" aria-label="重命名" @click="handleRename"><el-icon><Edit /></el-icon></button>
+        <button v-if="canEdit" title="移动" aria-label="移动" @click="openMoveDialog"><el-icon><Rank /></el-icon></button>
         <button
           title="收藏"
           aria-label="收藏"
@@ -474,6 +557,17 @@ onUnmounted(() => {
           @click="handleFavorite"
         >
           <el-icon><Star /></el-icon>
+        </button>
+        <button title="信息" aria-label="查看图片信息" @click="showInfoDialog = true"><el-icon><InfoFilled /></el-icon></button>
+        <button
+          v-if="canEdit"
+          class="btn-bookmark"
+          :class="{ active: isImageBookmarked }"
+          :title="isImageBookmarked ? '取消书签' : '书签'"
+          :aria-label="isImageBookmarked ? '取消书签' : '保存当前位置为书签'"
+          @click="handleSaveBookmark"
+        >
+          <el-icon><CollectionTag /></el-icon>
         </button>
         <button title="删除" aria-label="删除" class="btn-delete" @click="handleDelete">
           <el-icon><Delete /></el-icon>
@@ -489,6 +583,28 @@ onUnmounted(() => {
         <span id="meta-filesize">{{ fileSizeMB }}</span>
       </div>
     </div>
+
+    <el-dialog v-model="showMoveDialog" title="移动图片" width="400px" append-to-body>
+      <el-form label-position="top">
+        <el-form-item label="选择目标文件夹">
+          <el-select v-model="targetFolderId" placeholder="请选择" style="width: 100%">
+            <el-option
+              v-for="folder in folderStore.folders"
+              :key="folder.id"
+              :label="folder.name"
+              :value="folder.id"
+              :disabled="folder.id === image?.folder_id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showMoveDialog = false">取消</el-button>
+        <el-button type="primary" :loading="isMoving" @click="handleMove">确定移动</el-button>
+      </template>
+    </el-dialog>
+
+    <ImageInfoDialog v-model="showInfoDialog" :image="image" />
   </div>
 </template>
 
@@ -758,6 +874,11 @@ onUnmounted(() => {
     color: #ffb74d;
 }
 
+.lightbox-toolbar .btn-bookmark.active {
+    color: var(--primary);
+    background: var(--primary-soft);
+}
+
 .lightbox-toolbar .btn-delete:hover {
     background: rgba(245, 108, 108, 0.18);
     color: #f56c6c;
@@ -803,9 +924,13 @@ onUnmounted(() => {
     }
 
     .lightbox-toolbar {
-        top: 10px;
+        /* 计数器位于左上角，工具栏下移避免按钮增多后换行遮挡 */
+        top: 48px;
         right: 10px;
         gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        max-width: calc(100vw - 20px);
     }
 
     .lightbox-toolbar button {

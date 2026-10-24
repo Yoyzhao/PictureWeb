@@ -60,6 +60,9 @@ def create_app(test_config=None):
     from .routes import image
     app.register_blueprint(image.bp)
 
+    from .routes import bookmarks
+    app.register_blueprint(bookmarks.bp)
+
     from .routes import admin
     app.register_blueprint(admin.bp)
 

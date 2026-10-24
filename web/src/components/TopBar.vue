@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { Search, Setting, Plus, Sunny, Moon, Expand, Fold, Close } from '@element-plus/icons-vue'
-import { ref, computed } from 'vue'
+import { Search, Setting, Plus, Sunny, Moon, Expand, Fold, Close, CollectionTag } from '@element-plus/icons-vue'
+import { ref, computed, defineAsyncComponent } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useImageStore } from '@/stores/image'
+import { useBookmarkStore } from '@/stores/bookmark'
 import { useUIStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 
+const BookmarksDrawer = defineAsyncComponent(() => import('@/components/BookmarksDrawer.vue'))
+
 const authStore = useAuthStore()
 const imageStore = useImageStore()
+const bookmarkStore = useBookmarkStore()
 const uiStore = useUIStore()
+const showBookmarks = ref(false)
 const { searchQuery, showAdminView } = storeToRefs(imageStore)
 const { isSidebarCollapsed } = storeToRefs(uiStore)
 const router = useRouter()
@@ -78,10 +83,21 @@ const handleSettings = () => {
       <button class="btn-icon" title="上传（开发中）" aria-label="上传（开发中）" @click="handleUpload">
         <el-icon><Plus /></el-icon>
       </button>
+      <button
+        v-if="bookmarkStore.canBookmark"
+        class="btn-icon"
+        title="书签"
+        aria-label="书签"
+        @click="showBookmarks = true"
+      >
+        <el-icon><CollectionTag /></el-icon>
+      </button>
       <button class="btn-icon" title="设置" aria-label="设置" @click="handleSettings">
         <el-icon><Setting /></el-icon>
       </button>
     </div>
+
+    <BookmarksDrawer v-if="showBookmarks" v-model="showBookmarks" />
   </header>
 </template>
 
@@ -241,5 +257,13 @@ const handleSettings = () => {
 .btn-icon:hover {
     background: var(--accent);
     color: var(--primary);
+}
+
+/* 触屏端点按热区不小于 44px（后置以覆盖上面的基础尺寸） */
+@media (max-width: 768px) {
+    .top-bar .btn-icon {
+        width: 44px;
+        height: 44px;
+    }
 }
 </style>

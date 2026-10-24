@@ -57,6 +57,15 @@ export const batchDeleteImages = (imageIds: number[]) =>
 export const getImage = (id: number) => api.get(`/images/${id}`)
 export const deleteFolder = (id: number, hard = false) => api.delete(`/folders/${id}`, { params: { hard } })
 
+// Viewing-position bookmarks
+export const getBookmarks = () => api.get('/bookmarks')
+export const createBookmark = (data: any) => api.post('/bookmarks', data)
+export const saveAutoBookmark = (data: any) => api.post('/bookmarks/auto', data)
+export const updateBookmark = (id: number, data: any) => api.patch(`/bookmarks/${id}`, data)
+export const deleteBookmark = (id: number) => api.delete(`/bookmarks/${id}`)
+export const restoreBookmark = (id: number, params?: { before?: number; after?: number }) =>
+  api.get(`/bookmarks/${id}/restore`, { params })
+
 // Trash APIs
 export const getTrash = () => api.get('/images/trash/items')
 export const restoreTrash = (trashIds: number[]) => api.post('/images/trash/restore', { trash_ids: trashIds })

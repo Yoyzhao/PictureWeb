@@ -2,10 +2,11 @@
 import Sidebar from '@/components/Sidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import ImageGrid from '@/components/ImageGrid.vue'
-import { defineAsyncComponent, ref, computed, onMounted } from 'vue'
+import { defineAsyncComponent, ref, computed, onMounted, watch } from 'vue'
 import { useImageStore } from '@/stores/image'
 import { useHotkeyStore } from '@/stores/hotkey'
 import { useUIStore } from '@/stores/ui'
+import { useBookmarkStore } from '@/stores/bookmark'
 import { storeToRefs } from 'pinia'
 
 // 管理页、回收站与灯箱按需加载，避免进入首屏包
@@ -14,6 +15,7 @@ const TrashPage = defineAsyncComponent(() => import('@/pages/TrashPage.vue'))
 const Lightbox = defineAsyncComponent(() => import('@/components/Lightbox.vue'))
 
 const imageStore = useImageStore()
+const bookmarkStore = useBookmarkStore()
 const hotkeyStore = useHotkeyStore()
 const uiStore = useUIStore()
 const { images, total, loading, showAdminView, showTrash } = storeToRefs(imageStore)
@@ -49,6 +51,16 @@ const nextImage = computed(() => (currentIndex.value < images.value.length - 1) 
 const handleOpenLightbox = (image: any) => {
   currentImageId.value = image.id
   showLightbox.value = true
+}
+
+// Keep the automatic resume position in sync with the image being viewed.
+watch(currentImageId, (id) => {
+  if (id && showLightbox.value) bookmarkStore.saveAutoProgress(id)
+})
+
+const handleCloseLightbox = () => {
+  if (currentImageId.value) bookmarkStore.saveAutoProgress(currentImageId.value)
+  showLightbox.value = false
 }
 
 const handlePrev = () => {
@@ -106,7 +118,7 @@ const handleNext = async () => {
         :current-index="currentIndex"
         :total-images="total"
         :loading="loading"
-        @close="showLightbox = false"
+        @close="handleCloseLightbox"
         @prev="handlePrev"
         @next="handleNext"
       />

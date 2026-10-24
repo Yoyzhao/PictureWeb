@@ -42,13 +42,13 @@
 | 前端目录 | `web/` | 源码 `web/src/`，构建产物 `web/dist/` |
 | 前端页面 | `web/src/pages/` | `HomePage.vue`、`AdminPage.vue`、`TrashPage.vue` |
 | 前端路由 | `web/src/router/index.ts` | 仅 `/` 与 `/about`；管理页与回收站是 HomePage 内视图状态，不是独立路由 |
-| 前端组件 | `web/src/components/` | `Sidebar.vue`、`TopBar.vue`、`ImageGrid.vue`、`Lightbox.vue`、`common/VirtualWaterfall.vue` |
-| 状态管理 | `web/src/stores/` | Pinia：`auth`、`folder`、`image`、`hotkey`、`ui` |
+| 前端组件 | `web/src/components/` | `Sidebar.vue`、`TopBar.vue`、`ImageGrid.vue`、`Lightbox.vue`、`ImageInfoDialog.vue`、`BookmarksDrawer.vue`、`common/VirtualWaterfall.vue` |
+| 状态管理 | `web/src/stores/` | Pinia：`auth`、`folder`、`image`、`bookmark`、`hotkey`、`ui` |
 | API 封装 | `web/src/api/index.ts` | axios 实例，`baseURL=/api`，注入 Bearer Token；401 时清理失效凭证 |
 | 后端目录 | `server/app/` | Flask 应用包 |
-| 后端路由 | `server/app/routes/` | `auth.py`、`folder.py`、`image.py`、`admin.py` |
+| 后端路由 | `server/app/routes/` | `auth.py`、`folder.py`、`image.py`、`bookmarks.py`、`admin.py`、`settings.py` |
 | 后端服务 | `server/app/services/` | `scanner.py`（扫描）、`thumbnail.py`（缩略图） |
-| 数据模型 | `server/app/models/schema.sql` | 9 张业务表：users/folders/images/user_favorites/tags/image_tags/thumbnails/permissions/trash |
+| 数据模型 | `server/app/models/schema.sql` | 10 张业务表：users/folders/images/user_favorites/tags/image_tags/thumbnails/permissions/trash/image_bookmarks |
 | 数据访问 | `server/app/utils/db.py` | 连接管理、`init_db()`、`migrate_db()`、管理员/访客初始化、`reset_admin_password()` |
 | 测试数据库 | `data/db/database.db` | 开发/测试专用；生产库在部署副本 |
 | 缩略图/回收站 | `data/cache/`、`data/trash/` | 本地开发专用；生产使用部署副本配置 |
@@ -65,7 +65,8 @@
 |------|------|------|----------|
 | 认证 | `routes/auth.py` | `/api/auth` | `POST /login`、`GET /me`；签名 Token，管理员凭据来自 `.env` |
 | 文件夹 | `routes/folder.py` | `/api/folders` | 列表（按角色过滤）、新增并异步扫描、PATCH、删除（可选硬删除到回收站）、重新扫描 |
-| 图片 | `routes/image.py` | `/api/images` | 分页列表（keyset cursor/next_cursor、FTS5 搜索）、详情、重命名、收藏切换、缩略图/原图/下载、批量移动/删除、回收站列表/缩略图/恢复/清空 |
+| 图片 | `routes/image.py` | `/api/images` | 分页列表（keyset cursor/next_cursor、FTS5 搜索）、锚点窗口（书签恢复/定位）、详情、重命名、收藏切换、缩略图/原图/下载、批量移动/删除、回收站列表/缩略图/恢复/清空 |
+| 书签 | `routes/bookmarks.py` | `/api/bookmarks` | 手动书签 CRUD、自动进度 upsert、按锚点恢复视图窗口；锚点缺失时按保存的排序键兜底 |
 | 管理 | `routes/admin.py` | `/api/admin` | 全模块管理员校验；缓存统计/清理、用户 CRUD、文件夹列表/删除、权限 CRUD、系统设置读写 |
 | 公开设置 | `routes/settings.py` | `/api/settings` | 匿名可读；仅返回 `HOTKEYS` 与 `ENABLE_PRELOAD`，供前端快捷键/预加载使用 |
 | 健康检查 | `app/__init__.py` | `/api/health` | 返回 `{"status":"ok"}` |

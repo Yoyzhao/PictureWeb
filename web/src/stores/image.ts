@@ -3,10 +3,12 @@ import { ref, shallowRef, watch, triggerRef } from 'vue'
 import { watchDebounced } from '@vueuse/core'
 import { 
   getImages, 
+  getImage,
   updateImage, 
   batchMoveImages, 
   batchDeleteImages, 
   toggleImageFavorite,
+  restoreBookmark as fetchBookmarkWindow,
   getTrash,
   restoreTrash,
   clearTrash
@@ -44,6 +46,13 @@ export const useImageStore = defineStore('image', () => {
   const searchQuery = ref('')
   const selectedImageIds = ref<number[]>([])
   const gridSize = ref<'small' | 'medium' | 'large'>('medium')
+  // Anchor requested by a bookmark restore; VirtualWaterfall scrolls to it once laid out.
+  const scrollAnchorId = ref<number | null>(null)
+  const scrollAnchorVersion = ref(0)
+
+  // Context changes made programmatically during restore must not trigger extra list resets.
+  let suppressAutoFetchUntil = 0
+  const shouldSkipAutoFetch = () => Date.now() < suppressAutoFetchUntil
 
   // Request coordination: abort stale requests and ignore out-of-order responses.
   let activeController: AbortController | null = null
@@ -128,11 +137,13 @@ export const useImageStore = defineStore('image', () => {
 
   // Folder/filter/sort changes should react immediately.
   watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder], () => {
+    if (shouldSkipAutoFetch()) return
     fetchImages(true)
   })
 
   // Typing in the search box should not trigger one request per keystroke.
   watchDebounced(searchQuery, () => {
+    if (shouldSkipAutoFetch()) return
     fetchImages(true)
   }, { debounce: 300 })
 
@@ -142,6 +153,61 @@ export const useImageStore = defineStore('image', () => {
     folderStore.selectFolder(undefined)
     fetchImages(true)
   })
+
+  // Restore a saved bookmark: apply its view context and load a window around the anchor.
+  const restoreBookmarkWindow = async (bookmarkId: number) => {
+    activeController?.abort()
+    const seq = ++requestSeq
+    const controller = new AbortController()
+    activeController = controller
+    loading.value = true
+
+    try {
+      const res = await fetchBookmarkWindow(bookmarkId, { before: 40, after: 80 })
+      if (controller.signal.aborted || seq !== requestSeq) return null
+
+      // Guard right before applying context: the restore response may take longer than
+      // the watchers' flush window, so the guard must start after the data arrives.
+      suppressAutoFetchUntil = Date.now() + 1500
+
+      const context = res.data.context || {}
+      folderStore.selectFolder(context.folder_id ? context.folder_id : undefined)
+      showOnlyFavorites.value = !!context.is_favorites
+      showAdminView.value = false
+      showTrash.value = false
+      sortBy.value = context.sort_by || 'modified_time'
+      sortOrder.value = context.sort_order || 'DESC'
+      searchQuery.value = context.search_query || ''
+
+      const data = (res.data.data || []).map((img: any) => ({
+        ...img,
+        is_favorite: !!img.is_favorite
+      }))
+      images.value = data
+      imagesVersion.value++
+      loadedIds.clear()
+      data.forEach((img: Image) => loadedIds.add(img.id))
+      total.value = res.data.total
+      nextCursor.value = res.data.next_cursor || null
+      page.value = 1
+      selectedImageIds.value = []
+
+      const anchor = res.data.anchor || {}
+      if (anchor.image_id) {
+        scrollAnchorId.value = anchor.image_id
+        scrollAnchorVersion.value++
+      }
+      return { anchor, total: total.value }
+    } catch (error) {
+      console.error('Failed to restore bookmark', error)
+      throw error
+    } finally {
+      if (seq === requestSeq) {
+        loading.value = false
+        activeController = null
+      }
+    }
+  }
 
   const toggleFavorite = async (image: Image) => {
     const authStore = useAuthStore()
@@ -158,6 +224,7 @@ export const useImageStore = defineStore('image', () => {
       const index = images.value.findIndex(img => img.id === image.id)
       if (index !== -1) {
         images.value[index] = { ...images.value[index], is_favorite: newState }
+        imagesVersion.value++
         triggerRef(images)
       }
       
@@ -259,10 +326,29 @@ export const useImageStore = defineStore('image', () => {
     }
   }
 
+  const clearScrollAnchor = () => {
+    scrollAnchorId.value = null
+  }
+
   const removeImageLocally = (id: number) => {
     images.value = images.value.filter(img => img.id !== id)
     loadedIds.delete(id)
     total.value = Math.max(0, total.value - 1)
+  }
+
+  // Re-read a single record after operations (e.g. move) that change its folder/path/name.
+  const refreshImage = async (id: number) => {
+    try {
+      const res = await getImage(id)
+      const index = images.value.findIndex(img => img.id === id)
+      if (index !== -1) {
+        images.value[index] = { ...images.value[index], ...res.data, is_favorite: !!res.data.is_favorite }
+        imagesVersion.value++
+        triggerRef(images)
+      }
+    } catch (error) {
+      console.error('Failed to refresh image', error)
+    }
   }
 
   const trashItems = ref<any[]>([])
@@ -332,6 +418,7 @@ export const useImageStore = defineStore('image', () => {
         const index = images.value.findIndex(img => img.id === id)
         if (index !== -1) {
           images.value[index] = { ...images.value[index], file_name: newName }
+          imagesVersion.value++
           triggerRef(images)
         }
         return { success: true }
@@ -357,6 +444,10 @@ export const useImageStore = defineStore('image', () => {
     selectedImageIds,
     showTrash,
     fetchImages,
+    restoreBookmarkWindow,
+    scrollAnchorId,
+    scrollAnchorVersion,
+    clearScrollAnchor,
     toggleFavorite,
     toggleImageSelection,
     clearSelection,
@@ -366,6 +457,7 @@ export const useImageStore = defineStore('image', () => {
     batchMoveImages,
     batchDeleteImages,
     removeImageLocally,
+    refreshImage,
     renameImage,
     trashItems,
     trashLoading,

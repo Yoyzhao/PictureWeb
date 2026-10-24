@@ -105,6 +105,7 @@ graph TD
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
 | GET | `/api/images` | 可选登录 | 分页列表；非管理员仅返回自己的文件夹、公开文件夹或拥有任一权限的文件夹中的图片；`is_favorite=true` 对匿名用户返回空集；支持 `folder_id`、`is_favorite`、`q`、`sort_by`、`sort_order`、`cursor` |
+| GET | `/api/images/window` | 可选登录 | 按 `anchor_id` 返回前后窗口（keyset，`before`≤100、`after`≤200），用于书签恢复与定位；锚点不在当前视图时可用 `fallback_value` 按保存的排序键定位最近位置；返回 `anchor.window_index/found/fallback` |
 | GET | `/api/images/<id>` | 可选登录 | 图片详情，附带当前用户收藏状态；需要该文件夹的读取权限（公开文件夹允许匿名） |
 | PATCH | `/api/images/<id>` | 登录（非 guest）+ `rename` 权限 | 重命名（仅 `file_name`，禁止通过该接口改 `folder_id`）；文件名必须是纯文件名 |
 | POST | `/api/images/<id>/favorite` | 登录（非 guest）+ 读取权限 | 切换当前用户收藏状态 |
@@ -155,6 +156,19 @@ graph TD
 |------|------|------|------|
 | GET | `/api/settings` | 公开 | 只返回 `HOTKEYS` 与 `ENABLE_PRELOAD`；不暴露 `.env` 或管理员配置 |
 
+### 4.8 浏览位置书签（`/api/bookmarks`）
+
+书签保存“锚点图片 + 视图上下文（文件夹/收藏/搜索/排序）”，不保存页码或滚动偏移。
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | `/api/bookmarks` | 登录 | 当前用户的书签；自动进度排在手动书签前，最多 200 条 |
+| POST | `/api/bookmarks` | 登录（非 guest） | 创建手动书签；校验锚点图片读取权限、文件夹与收藏视图一致性；同一用户/视图/锚点已存在时返回已有记录；服务端快照锚点排序键 |
+| POST | `/api/bookmarks/auto` | 登录（非 guest） | 按 `(folder_id, is_favorites, search_query)` upsert 自动进度，更新排序与锚点 |
+| PATCH | `/api/bookmarks/<id>` | 登录（所有者） | 重命名书签 |
+| DELETE | `/api/bookmarks/<id>` | 登录（所有者） | 删除书签 |
+| GET | `/api/bookmarks/<id>/restore` | 登录（所有者） | 返回视图上下文、锚点窗口（`before`≤100、`after`≤200）与 `next_cursor`；锚点被删除/移出视图时返回 `anchor.fallback=true` 并定位最近位置 |
+
 ## 5. 服务器架构图
 
 ```mermaid
@@ -190,6 +204,7 @@ erDiagram
     USERS ||--o{ PERMISSIONS : granted
     FOLDERS ||--o{ PERMISSIONS : scoped
     USERS ||--o{ TRASH : deletes
+    USERS ||--o{ IMAGE_BOOKMARKS : bookmarks
 
     USERS {
         integer id PK
@@ -271,6 +286,24 @@ erDiagram
         integer user_id FK
         text metadata
         datetime deleted_at
+    }
+
+    IMAGE_BOOKMARKS {
+        integer id PK
+        integer user_id FK
+        string kind
+        string name
+        integer folder_id
+        boolean is_favorites
+        string search_query
+        string sort_by
+        string sort_order
+        integer anchor_image_id
+        string anchor_modified_time
+        string anchor_file_name
+        integer anchor_file_size
+        datetime created_at
+        datetime updated_at
     }
 ```
 
@@ -418,6 +451,33 @@ CREATE INDEX idx_trash_user_id ON trash(user_id);
 CREATE INDEX idx_trash_deleted_at ON trash(deleted_at);
 ```
 
+#### 浏览位置书签表 (image_bookmarks)
+```sql
+CREATE TABLE image_bookmarks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    kind VARCHAR(10) NOT NULL DEFAULT 'manual' CHECK (kind IN ('manual', 'auto')),
+    name VARCHAR(100) NOT NULL,
+    folder_id INTEGER NOT NULL DEFAULT 0,       -- 0 = 所有照片
+    is_favorites INTEGER NOT NULL DEFAULT 0,
+    search_query TEXT NOT NULL DEFAULT '',
+    sort_by VARCHAR(20) NOT NULL DEFAULT 'modified_time',
+    sort_order VARCHAR(4) NOT NULL DEFAULT 'DESC',
+    anchor_image_id INTEGER NOT NULL,
+    anchor_modified_time TEXT,
+    anchor_file_name TEXT,
+    anchor_file_size INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_image_bookmarks_user ON image_bookmarks(user_id, kind, updated_at);
+CREATE UNIQUE INDEX idx_image_bookmarks_auto
+    ON image_bookmarks(user_id, folder_id, is_favorites, search_query)
+    WHERE kind = 'auto';
+```
+
 ## 7. 前端架构
 
 ### 7.1 组件层次结构
@@ -431,6 +491,8 @@ web/src/
 │   ├── TopBar.vue           # 顶部搜索与主题切换
 │   ├── ImageGrid.vue        # 图片网格与批量操作
 │   ├── Lightbox.vue         # 图片详情灯箱
+│   ├── ImageInfoDialog.vue  # 图片详情弹窗（网格/灯箱共用）
+│   ├── BookmarksDrawer.vue  # 浏览位置书签抽屉
 │   ├── Empty.vue            # 空状态占位
 │   └── common/
 │       └── VirtualWaterfall.vue  # 虚拟滚动瀑布流
@@ -447,7 +509,8 @@ web/src/
 ├── stores/
 │   ├── auth.ts              # 登录状态与 401 重置
 │   ├── folder.ts            # 文件夹列表与当前选择
-│   ├── image.ts             # 图片/回收站/批量操作
+│   ├── image.ts             # 图片/回收站/批量操作/书签窗口恢复
+│   ├── bookmark.ts          # 浏览位置书签与自动进度
 │   ├── hotkey.ts            # 快捷键配置
 │   └── ui.ts                # 侧边栏与响应式状态
 ├── App.vue
@@ -460,7 +523,8 @@ web/src/
 使用 Pinia 进行状态管理：
 
 - **authStore**：管理用户登录状态、Token 与角色；Token 失效时由 API 层事件触发重置
-- **imageStore**：管理图片数据、分页、加载状态、筛选条件、批量操作与回收站
+- **imageStore**：管理图片数据、分页、加载状态、筛选条件、批量操作、回收站与书签锚点窗口恢复
+- **bookmarkStore**：管理手动书签与自动浏览进度；负责保存当前视图位置、恢复书签视图与锚点
 - **folderStore**：管理文件夹结构、当前选中文件夹
 - **hotkeyStore**：从 `/api/admin/settings` 读取快捷键配置
 - **uiStore**：管理侧边栏折叠与移动端响应式状态
@@ -506,7 +570,7 @@ PicGallery/
 │   ├── app/
 │   │   ├── __init__.py          # create_app、.env/config 加载、蓝图注册、web/dist 静态托管
 │   │   ├── models/schema.sql    # 建表语句
-│   │   ├── routes/              # auth.py / folder.py / image.py / admin.py / settings.py
+│   │   ├── routes/              # auth.py / folder.py / image.py / bookmarks.py / admin.py / settings.py
 │   │   ├── services/            # scanner.py（扫描）/ thumbnail.py（缩略图与预生成）
 │   │   └── utils/db.py          # 连接、建表、轻量迁移、FTS5 索引、管理员/访客初始化
 │   ├── venv/                    # Python 3.12.7 虚拟环境（git 忽略）
@@ -515,11 +579,11 @@ PicGallery/
 ├── web/                         # Vue3 + Vite 前端
 │   ├── src/
 │   │   ├── api/                 # axios 封装与 401 清理
-│   │   ├── components/          # Sidebar/TopBar/ImageGrid/Lightbox/common
+│   │   ├── components/          # Sidebar/TopBar/ImageGrid/Lightbox/ImageInfoDialog/BookmarksDrawer/common
 │   │   ├── composables/         # useTheme
 │   │   ├── pages/               # HomePage/AdminPage/TrashPage
 │   │   ├── router/              # 路由
-│   │   ├── stores/              # Pinia：auth/folder/image/hotkey/ui
+│   │   ├── stores/              # Pinia：auth/folder/image/bookmark/hotkey/ui
 │   │   ├── lib/                 # 工具函数
 │   │   ├── App.vue
 │   │   ├── main.ts
@@ -554,6 +618,7 @@ PicGallery/
 - `GET /api/images` 的 `page` 最小为 1、`per_page` 限制在 1–200，避免异常大分页。
 - 图片响应启用条件请求与缓存头：缩略图 `max-age=86400`，原图/下载 `max-age=3600`。
 - 文件名搜索使用 FTS5 trigram 虚拟表 `images_fts`，查询词 ≥3 字符走 `MATCH`，短词或 FTS5 不可用时回退 `LIKE`；索引与 `images` 通过触发器同步，可用 `init_db.py --rebuild-search-index` 重建。
+- 书签恢复与定位使用 `/api/images/window` 的 keyset 前后窗口查询，不按页码或深 `OFFSET` 加载；窗口默认前 40、后 80，上限 100/200。
 - 列表分页支持 keyset 游标：`cursor`/`next_cursor` 绑定排序与最后一条记录，避免深层 `OFFSET`；首次请求仍返回完整 `total`。
 - 后续：窗口化数据源/元数据级虚拟化；定期 `ANALYZE`/`VACUUM`。
 

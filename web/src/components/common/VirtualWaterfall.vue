@@ -19,9 +19,12 @@ const props = defineProps<{
   buffer?: number
   /** Fixed height reserved below the image for title/meta content. */
   metaHeight?: number
+  /** Anchor requested by a bookmark restore. */
+  scrollToId?: number | null
+  scrollRequest?: number
 }>()
 
-const emit = defineEmits(['load-more'])
+const emit = defineEmits(['load-more', 'view-anchor', 'scroll-anchor-done'])
 
 const gapValue = props.gap ?? 16
 const bufferValue = props.buffer ?? 800
@@ -165,6 +168,26 @@ const visibleItems = computed(() => {
   return list.slice(startIdx, endIdx)
 })
 
+// First row intersecting the real viewport (not the buffered range) is the position anchor.
+const viewportFirstItem = computed(() => {
+  const list = layoutItems.value
+  if (!list.length) return null
+
+  let idx = lowerBoundByTop(list, scrollTop.value)
+  while (idx > 0 && list[idx - 1].top + list[idx - 1].height > scrollTop.value) {
+    idx--
+  }
+  return list[idx] || null
+})
+
+let lastViewAnchor: number | string | null = null
+watch(viewportFirstItem, (item) => {
+  if (item && item.id !== lastViewAnchor) {
+    lastViewAnchor = item.id
+    emit('view-anchor', item.id)
+  }
+})
+
 let lastLoadMoreAt = 0
 
 const maybeLoadMore = () => {
@@ -271,6 +294,24 @@ watch([() => props.items, () => props.items.length, () => props.itemsVersion], (
   lastLength = length
   calculateLayout(isAppend)
 })
+
+// Scroll to a bookmark anchor once its layout entry exists.
+let lastScrollRequest = 0
+const scrollToAnchor = () => {
+  const request = props.scrollRequest ?? 0
+  if (!props.scrollToId || request === lastScrollRequest) return
+
+  const target = layoutItems.value.find(item => item.id === props.scrollToId)
+  const container = scrollContainerRef.value
+  if (!target || !container) return
+
+  container.scrollTop = Math.max(0, target.top - 4)
+  lastScrollRequest = request
+  syncViewport()
+  emit('scroll-anchor-done')
+}
+
+watch([() => props.scrollRequest, layoutItems], scrollToAnchor, { flush: 'post' })
 </script>
 
 <template>

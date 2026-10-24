@@ -89,6 +89,193 @@ def _path_in_use(db, path):
     db_path = path.replace('\\', '/')
     return db.execute("SELECT 1 FROM images WHERE file_path = ?", (db_path,)).fetchone() is not None
 
+
+ALLOWED_SORT_FIELDS = ['modified_time', 'file_name', 'file_size']
+
+
+def image_select(user):
+    """SELECT prefix with the favorite flag; only authenticated users need the join."""
+    if user:
+        return (
+            """
+            SELECT i.*,
+                   CASE WHEN uf.user_id IS NOT NULL THEN 1 ELSE 0 END as is_fav
+            FROM images i
+            LEFT JOIN user_favorites uf ON i.id = uf.image_id AND uf.user_id = ?
+            """,
+            [user['id']]
+        )
+    return "SELECT i.*, 0 as is_fav FROM images i", []
+
+
+def image_filters(user, folder_id, is_favorite, q):
+    """Shared WHERE conditions and params for list/window queries."""
+    conditions = []
+    params = []
+
+    # Permission check: User must have access to the folder the image belongs to
+    if not user or user['role'] != 'admin':
+        # Non-admins can see their own folders, public folders and folders with read permission.
+        user_id_val = user['id'] if user else -1
+        conditions.append("""
+            i.folder_id IN (
+                SELECT id FROM folders WHERE user_id = ? OR is_public = 1
+                UNION
+                SELECT folder_id FROM permissions WHERE user_id = ?
+                  AND permission_type IN ('read', 'write', 'delete', 'rename')
+            )
+        """)
+        params.extend([user_id_val, user_id_val])
+
+    if folder_id:
+        conditions.append("i.folder_id = ?")
+        params.append(folder_id)
+
+    if is_favorite == 'true':
+        # Anonymous users have no favorites; do not fall back to the full list.
+        conditions.append("uf.user_id IS NOT NULL" if user else "1 = 0")
+    elif is_favorite == 'false' and user:
+        conditions.append("uf.user_id IS NULL")
+
+    if q:
+        term = q.strip()
+        # FTS5 trigram supports substring search for 3+ characters; shorter terms fall back to LIKE.
+        if term and current_app.config.get('FTS5_ENABLED') and len(term) >= 3:
+            conditions.append("i.id IN (SELECT rowid FROM images_fts WHERE images_fts MATCH ?)")
+            params.append('"' + term.replace('"', '""') + '"')
+        else:
+            conditions.append("i.file_name LIKE ?")
+            params.append(f"%{q}%")
+
+    return conditions, params
+
+
+def serialize_image(img):
+    img_dict = dict(img)
+    if img_dict.get('modified_time') and hasattr(img_dict['modified_time'], 'isoformat'):
+        img_dict['modified_time'] = img_dict['modified_time'].isoformat()
+    img_dict['is_favorite'] = bool(img_dict.get('is_fav', 0))
+    return img_dict
+
+
+def fetch_image_window(db, user, folder_id, is_favorite, q, sort_by, sort_order,
+                       anchor_id, fallback_value=None, before=40, after=80):
+    """Return a keyset window centered on an anchor image.
+
+    The anchor is resolved by id first so a rename/move/sort change still lands on the
+    right image. When the image is gone (or no longer belongs to the view), the saved
+    sort value is used to locate the nearest remaining position.
+    """
+    base_query, params = image_select(user)
+    conditions, filter_params = image_filters(user, folder_id, is_favorite, q)
+    params.extend(filter_params)
+    where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    and_or_where = " AND " if conditions else " WHERE "
+
+    total = db.execute(f"SELECT COUNT(*) FROM ({base_query}{where_clause})", params).fetchone()[0]
+
+    anchor_row = None
+    fallback_used = False
+    anchor_reason = None
+
+    if anchor_id:
+        anchor_query = base_query + where_clause + and_or_where + "i.id = ? LIMIT 1"
+        anchor_row = db.execute(anchor_query, params + [anchor_id]).fetchone()
+
+    if anchor_row is None and anchor_id:
+        anchor_reason = 'not_in_view'
+        if fallback_value not in (None, ''):
+            try:
+                if sort_by == 'file_size':
+                    fallback_value = int(fallback_value)
+            except (TypeError, ValueError):
+                fallback_value = None
+                anchor_reason = 'invalid_fallback'
+
+            if fallback_value is not None:
+                operator = '<' if sort_order == 'DESC' else '>'
+                reverse_operator = '>' if sort_order == 'DESC' else '<'
+                next_order = 'DESC' if sort_order == 'DESC' else 'ASC'
+                prev_order = 'ASC' if sort_order == 'DESC' else 'DESC'
+
+                after_cond = f"(i.{sort_by} {operator} ? OR (i.{sort_by} = ? AND i.id {operator} ?))"
+                q_next = (base_query + where_clause + and_or_where + after_cond +
+                          f" ORDER BY i.{sort_by} {next_order}, i.id {next_order} LIMIT 1")
+                anchor_row = db.execute(
+                    q_next, params + [fallback_value, fallback_value, anchor_id]
+                ).fetchone()
+
+                if anchor_row is None:
+                    before_cond = f"(i.{sort_by} {reverse_operator} ? OR (i.{sort_by} = ? AND i.id {reverse_operator} ?))"
+                    q_prev = (base_query + where_clause + and_or_where + before_cond +
+                              f" ORDER BY i.{sort_by} {prev_order}, i.id {prev_order} LIMIT 1")
+                    anchor_row = db.execute(
+                        q_prev, params + [fallback_value, fallback_value, anchor_id]
+                    ).fetchone()
+
+                if anchor_row is not None:
+                    fallback_used = True
+
+    if anchor_row is None:
+        return {
+            'data': [],
+            'total': total,
+            'next_cursor': None,
+            'anchor': {
+                'image_id': anchor_id,
+                'window_index': -1,
+                'found': False,
+                'fallback': False,
+                'reason': anchor_reason or 'empty'
+            }
+        }
+
+    found_anchor_id = anchor_row['id']
+    anchor_value = cursor_value(anchor_row, sort_by)
+    operator = '<' if sort_order == 'DESC' else '>'
+    reverse_operator = '>' if sort_order == 'DESC' else '<'
+    next_order = 'DESC' if sort_order == 'DESC' else 'ASC'
+    prev_order = 'ASC' if sort_order == 'DESC' else 'DESC'
+
+    above_cond = f"(i.{sort_by} {reverse_operator} ? OR (i.{sort_by} = ? AND i.id {reverse_operator} ?))"
+    above_query = (base_query + where_clause + and_or_where + above_cond +
+                   f" ORDER BY i.{sort_by} {prev_order}, i.id {prev_order} LIMIT ?")
+    above_rows = db.execute(
+        above_query, params + [anchor_value, anchor_value, found_anchor_id, before]
+    ).fetchall()
+
+    below_cond = f"(i.{sort_by} {operator} ? OR (i.{sort_by} = ? AND i.id {operator} ?))"
+    below_query = (base_query + where_clause + and_or_where + below_cond +
+                   f" ORDER BY i.{sort_by} {next_order}, i.id {next_order} LIMIT ?")
+    below_rows = db.execute(
+        below_query, params + [anchor_value, anchor_value, found_anchor_id, after]
+    ).fetchall()
+
+    data_rows = list(reversed(above_rows)) + [anchor_row] + list(below_rows)
+
+    next_cursor = None
+    if below_rows and len(below_rows) == after:
+        last = below_rows[-1]
+        next_cursor = encode_cursor({
+            's': sort_by,
+            'o': sort_order,
+            'v': cursor_value(last, sort_by),
+            'id': last['id']
+        })
+
+    return {
+        'data': data_rows,
+        'total': total,
+        'next_cursor': next_cursor,
+        'anchor': {
+            'image_id': found_anchor_id,
+            'window_index': len(above_rows),
+            'found': not fallback_used,
+            'fallback': fallback_used,
+            'reason': anchor_reason
+        }
+    }
+
 @bp.route('/<int:id>/favorite', methods=['POST'])
 @login_required
 def toggle_favorite(id):
@@ -538,8 +725,7 @@ def get_images():
     q = request.args.get('q', type=str)
     
     # Validate sort_by to prevent SQL injection
-    allowed_sort_fields = ['modified_time', 'file_name', 'file_size']
-    if sort_by not in allowed_sort_fields:
+    if sort_by not in ALLOWED_SORT_FIELDS:
         sort_by = 'modified_time'
     
     # Validate sort_order
@@ -554,54 +740,10 @@ def get_images():
         if not isinstance(last_id, int) or last_value is None:
             return jsonify({'error': 'Invalid cursor'}), 400
     
-    # Base query with LEFT JOIN to get favorite status for the current user
-    if user_id:
-        query = """
-            SELECT i.*, 
-                   CASE WHEN uf.user_id IS NOT NULL THEN 1 ELSE 0 END as is_fav
-            FROM images i
-            LEFT JOIN user_favorites uf ON i.id = uf.image_id AND uf.user_id = ?
-        """
-        params = [user_id]
-    else:
-        query = "SELECT i.*, 0 as is_fav FROM images i"
-        params = []
-    
-    conditions = []
-    
-    # Permission check: User must have access to the folder the image belongs to
-    if not user or user['role'] != 'admin':
-        # Non-admins can see their own folders, public folders and folders with read permission.
-        user_id_val = user['id'] if user else -1
-        conditions.append("""
-            i.folder_id IN (
-                SELECT id FROM folders WHERE user_id = ? OR is_public = 1
-                UNION
-                SELECT folder_id FROM permissions WHERE user_id = ?
-                  AND permission_type IN ('read', 'write', 'delete', 'rename')
-            )
-        """)
-        params.extend([user_id_val, user_id_val])
-
-    if folder_id:
-        conditions.append("i.folder_id = ?")
-        params.append(folder_id)
-        
-    if is_favorite == 'true':
-        # Anonymous users have no favorites; do not fall back to the full list.
-        conditions.append("uf.user_id IS NOT NULL" if user_id else "1 = 0")
-    elif is_favorite == 'false' and user_id:
-        conditions.append("uf.user_id IS NULL")
-        
-    if q:
-        term = q.strip()
-        # FTS5 trigram supports substring search for 3+ characters; shorter terms fall back to LIKE.
-        if term and current_app.config.get('FTS5_ENABLED') and len(term) >= 3:
-            conditions.append("i.id IN (SELECT rowid FROM images_fts WHERE images_fts MATCH ?)")
-            params.append('"' + term.replace('"', '""') + '"')
-        else:
-            conditions.append("i.file_name LIKE ?")
-            params.append(f"%{q}%")
+    # Base query and shared filters (also used by the bookmark window query).
+    query, params = image_select(user)
+    conditions, filter_params = image_filters(user, folder_id, is_favorite, q)
+    params.extend(filter_params)
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
@@ -639,17 +781,7 @@ def get_images():
             'id': last['id']
         })
     
-    # Process images to map is_fav to is_favorite
-    result_data = []
-    for img in images:
-        img_dict = dict(img)
-        # Serialize datetime
-        if img_dict.get('modified_time') and hasattr(img_dict['modified_time'], 'isoformat'):
-            img_dict['modified_time'] = img_dict['modified_time'].isoformat()
-            
-        # Map is_fav to is_favorite, defaulting to 0/False if not present
-        img_dict['is_favorite'] = bool(img_dict.get('is_fav', 0))
-        result_data.append(img_dict)
+    result_data = [serialize_image(img) for img in images]
     
     return jsonify({
         'data': result_data,
@@ -658,6 +790,51 @@ def get_images():
         'per_page': per_page,
         'next_cursor': next_cursor
     })
+
+@bp.route('/window', methods=['GET'])
+def get_images_window():
+    """Keyset window around an anchor image, used by bookmark restore and locate."""
+    db = get_db()
+    user = get_current_user()
+
+    anchor_id = request.args.get('anchor_id', type=int)
+    if not anchor_id:
+        return jsonify({'error': 'anchor_id is required'}), 400
+
+    folder_id = request.args.get('folder_id', type=int)
+    is_favorite = request.args.get('is_favorite', type=str)
+    sort_by = request.args.get('sort_by', 'modified_time')
+    sort_order = request.args.get('sort_order', 'DESC').upper()
+    q = request.args.get('q', type=str)
+    fallback_value = request.args.get('fallback_value', type=str)
+
+    if sort_by not in ALLOWED_SORT_FIELDS:
+        sort_by = 'modified_time'
+    if sort_order not in ['ASC', 'DESC']:
+        sort_order = 'DESC'
+
+    before = min(max(request.args.get('before', 40, type=int), 0), 100)
+    after = min(max(request.args.get('after', 80, type=int), 1), 200)
+
+    result = fetch_image_window(
+        db, user, folder_id, is_favorite, q, sort_by, sort_order,
+        anchor_id, fallback_value=fallback_value, before=before, after=after
+    )
+
+    return jsonify({
+        'data': [serialize_image(row) for row in result['data']],
+        'total': result['total'],
+        'next_cursor': result['next_cursor'],
+        'anchor': result['anchor'],
+        'context': {
+            'folder_id': folder_id or 0,
+            'is_favorites': is_favorite == 'true',
+            'search_query': q or '',
+            'sort_by': sort_by,
+            'sort_order': sort_order
+        }
+    })
+
 
 @bp.route('/<int:id>', methods=['GET'])
 def get_image(id):

@@ -108,6 +108,31 @@ CREATE TABLE IF NOT EXISTS permissions (
     UNIQUE(user_id, folder_id, permission_type)
 );
 
+-- Viewing-position bookmarks (anchor image + view context)
+CREATE TABLE IF NOT EXISTS image_bookmarks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    kind VARCHAR(10) NOT NULL DEFAULT 'manual' CHECK (kind IN ('manual', 'auto')),
+    name VARCHAR(100) NOT NULL,
+    folder_id INTEGER NOT NULL DEFAULT 0,       -- 0 = all accessible photos
+    is_favorites INTEGER NOT NULL DEFAULT 0,
+    search_query TEXT NOT NULL DEFAULT '',
+    sort_by VARCHAR(20) NOT NULL DEFAULT 'modified_time',
+    sort_order VARCHAR(4) NOT NULL DEFAULT 'DESC',
+    anchor_image_id INTEGER NOT NULL,
+    anchor_modified_time TEXT,
+    anchor_file_name TEXT,
+    anchor_file_size INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_bookmarks_user ON image_bookmarks(user_id, kind, updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_image_bookmarks_auto
+    ON image_bookmarks(user_id, folder_id, is_favorites, search_query)
+    WHERE kind = 'auto';
+
 -- Trash table
 CREATE TABLE IF NOT EXISTS trash (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

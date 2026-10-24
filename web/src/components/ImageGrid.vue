@@ -5,12 +5,35 @@ import { useFolderStore } from '@/stores/folder'
 import { useAuthStore } from '@/stores/auth'
 import { storeToRefs } from 'pinia'
 import { useIntersectionObserver } from '@vueuse/core'
-import { Star, More, Loading, InfoFilled, Download, Delete, Rank, Edit } from '@element-plus/icons-vue'
+import { Star, More, Loading, InfoFilled, Download, Delete, Rank, Edit, CollectionTag } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import VirtualWaterfall from './common/VirtualWaterfall.vue'
+import ImageInfoDialog from './ImageInfoDialog.vue'
+import { useBookmarkStore } from '@/stores/bookmark'
 
 const imageStore = useImageStore()
-const { images, imagesVersion, loading, total, showOnlyFavorites, sortBy, sortOrder, selectedImageIds, gridSize } = storeToRefs(imageStore)
+const bookmarkStore = useBookmarkStore()
+const {
+  images, imagesVersion, loading, total, showOnlyFavorites, sortBy, sortOrder,
+  selectedImageIds, gridSize, scrollAnchorId, scrollAnchorVersion
+} = storeToRefs(imageStore)
+const currentViewAnchorId = ref<number | null>(null)
+const currentPositionBookmarked = computed(() =>
+  currentViewAnchorId.value !== null && bookmarkStore.bookmarkedImageIds.has(currentViewAnchorId.value)
+)
+
+const handleViewAnchor = (id: number) => {
+  currentViewAnchorId.value = id
+  bookmarkStore.saveAutoProgress(id)
+}
+
+const handleSaveBookmark = () => {
+  if (!currentViewAnchorId.value) {
+    ElMessage.warning('请先浏览图片后再保存当前位置')
+    return
+  }
+  bookmarkStore.toggleAt(currentViewAnchorId.value)
+}
 const folderStore = useFolderStore()
 const { folders, currentFolderId } = storeToRefs(folderStore)
 const authStore = useAuthStore()
@@ -23,6 +46,8 @@ const showMoveDialog = ref(false)
 const targetFolderId = ref<number | null>(null)
 const isBatchMove = ref(false)
 const singleMoveImageId = ref<number | null>(null)
+// Source folders of the images being moved; moving into the same folder is rejected by the backend.
+const moveSourceFolderIds = ref<number[]>([])
 
 const showInfoDialog = ref(false)
 const selectedImage = ref<any>(null)
@@ -106,10 +131,17 @@ const openMoveDialog = (id?: number) => {
   if (id) {
     isBatchMove.value = false
     singleMoveImageId.value = id
+    const image = images.value.find(img => img.id === id)
+    moveSourceFolderIds.value = image ? [image.folder_id] : []
   } else {
     isBatchMove.value = true
     singleMoveImageId.value = null
+    const selected = new Set(selectedImageIds.value)
+    moveSourceFolderIds.value = [...new Set(
+      images.value.filter(img => selected.has(img.id)).map(img => img.folder_id)
+    )]
   }
+  targetFolderId.value = null
   showMoveDialog.value = true
 }
 
@@ -222,6 +254,17 @@ const toggleSelection = (id: number) => {
           <h2 class="current-folder">{{ currentTitle }}</h2>
           <div class="view-options">
               <span class="item-count">共 {{ total }} 张图片</span>
+              <el-button
+                v-if="bookmarkStore.canBookmark"
+                size="small"
+                class="save-bookmark-btn"
+                :class="{ 'is-active': currentPositionBookmarked }"
+                :title="currentPositionBookmarked ? '再次点击取消书签' : '将当前顶部图片位置保存为书签'"
+                @click="handleSaveBookmark"
+              >
+                <el-icon><CollectionTag /></el-icon>
+                <span>{{ currentPositionBookmarked ? '已书签' : '记住这里' }}</span>
+              </el-button>
               <el-radio-group v-model="gridSize" size="small" class="grid-size-radio">
                   <el-radio-button value="small">小</el-radio-button>
                   <el-radio-button value="medium">中</el-radio-button>
@@ -252,7 +295,11 @@ const toggleSelection = (id: number) => {
         :gap="16" 
         :buffer="600"
         :meta-height="metaHeight"
+        :scroll-to-id="scrollAnchorId"
+        :scroll-request="scrollAnchorVersion"
         @load-more="imageStore.fetchImages()"
+        @view-anchor="handleViewAnchor"
+        @scroll-anchor-done="imageStore.clearScrollAnchor()"
       >
       <template #default="{ item: img, index }">
         <div 
@@ -349,7 +396,7 @@ const toggleSelection = (id: number) => {
               :key="folder.id"
               :label="folder.name"
               :value="folder.id"
-              :disabled="folder.id === currentFolderId"
+              :disabled="folder.id === currentFolderId || moveSourceFolderIds.includes(folder.id)"
             />
           </el-select>
         </el-form-item>
@@ -360,35 +407,8 @@ const toggleSelection = (id: number) => {
       </template>
     </el-dialog>
 
-    <!-- 图片详情对话框 -->
-    <el-dialog v-model="showInfoDialog" title="图片详情" width="500px">
-      <div v-if="selectedImage" class="image-details">
-        <div class="detail-item">
-          <span class="label">文件名:</span>
-          <span class="value">{{ selectedImage.file_name }}</span>
-        </div>
-        <div class="detail-item">
-          <span class="label">文件大小:</span>
-          <span class="value">{{ (selectedImage.file_size / 1024 / 1024).toFixed(2) }} MB</span>
-        </div>
-        <div class="detail-item">
-          <span class="label">分辨率:</span>
-          <span class="value">{{ selectedImage.width }} x {{ selectedImage.height }}</span>
-        </div>
-        <div class="detail-item">
-          <span class="label">文件格式:</span>
-          <span class="value">{{ selectedImage.format.toUpperCase() }}</span>
-        </div>
-        <div class="detail-item">
-          <span class="label">修改时间:</span>
-          <span class="value">{{ isNaN(new Date(selectedImage.modified_time).getTime()) ? (new Date(selectedImage.modified_time * 1000).toLocaleString()) : (new Date(selectedImage.modified_time).toLocaleString()) }}</span>
-        </div>
-        <div class="detail-item">
-          <span class="label">存储路径:</span>
-          <span class="value path-value">{{ selectedImage.file_path }}</span>
-        </div>
-      </div>
-    </el-dialog>
+    <!-- 图片详情对话框（与灯箱共用） -->
+    <ImageInfoDialog v-model="showInfoDialog" :image="selectedImage" />
     </div>
   </div>
 </template>
@@ -492,36 +512,6 @@ const toggleSelection = (id: number) => {
 .img-card.selected .card-checkbox {
     opacity: 1;
     transform: scale(1.15); /* Slightly larger on hover/selected for better visibility */
-}
-
-.image-details {
-  padding: 10px;
-}
-
-.detail-item {
-  display: flex;
-  margin-bottom: 12px;
-  line-height: 1.6;
-}
-
-.detail-item .label {
-  width: 80px;
-  color: var(--text-secondary);
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
-.detail-item .value {
-  color: var(--text-primary);
-  word-break: break-all;
-}
-
-.path-value {
-  font-family: monospace;
-  font-size: 12px;
-  background: var(--bg-card);
-  padding: 4px 8px;
-  border-radius: 4px;
 }
 
 :deep(.card-checkbox .el-checkbox__inner) {
@@ -826,4 +816,16 @@ const toggleSelection = (id: number) => {
 
 .btn-primary { background: var(--primary); color: white; }
 .btn-danger { background: #dc3545; color: white; }
+
+.save-bookmark-btn.is-active {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-soft);
+}
+
+@media (max-width: 768px) {
+    .save-bookmark-btn {
+        height: 44px;
+    }
+}
 </style>
