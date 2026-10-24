@@ -168,6 +168,15 @@ def migrate_db(db):
                 ON image_bookmarks(user_id, folder_id, is_favorites, search_query)
                 WHERE kind = 'auto';
         """)
+
+        # Scan workers live in memory threads. After a restart no worker can finish,
+        # so leaving the status busy would block rescan and folder deletion forever.
+        db.execute("""
+            UPDATE folders
+            SET scan_status = 'failed',
+                scan_error = '上次扫描被服务重启中断，请重新扫描'
+            WHERE scan_status IN ('pending', 'scanning')
+        """)
         db.commit()
 
         # 4. Full-text index for filename search (falls back to LIKE if unavailable).

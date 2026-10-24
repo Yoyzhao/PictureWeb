@@ -98,8 +98,14 @@ const handleLogout = async () => {
 }
 
 const handleAddFolder = async () => {
-  if (!newFolderPath.value) return
-  await folderStore.createFolder(newFolderPath.value, newFolderName.value || undefined)
+  const path = newFolderPath.value.trim()
+  if (!path) {
+    ElMessage.warning('请输入文件夹绝对路径')
+    return
+  }
+  const created = await folderStore.createFolder(path, newFolderName.value.trim() || undefined)
+  // 添加失败时保留弹窗和输入，便于修正路径后重试。
+  if (!created) return
   showAddDialog.value = false
   newFolderPath.value = ''
   newFolderName.value = ''

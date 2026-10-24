@@ -93,12 +93,12 @@ graph TD
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
 | GET | `/api/folders` | 可选登录 | 管理员返回全部；登录用户返回自己的文件夹、公开文件夹以及拥有任一权限的文件夹；匿名仅返回公开文件夹 |
-| POST | `/api/folders` | 登录（非 guest） | 添加文件夹并触发后台异步扫描；参数 `path`、可选 `name`、`is_public` |
-| PATCH | `/api/folders/<id>` | 管理员 | 更新 `name`、`path`、`is_public` |
-| DELETE | `/api/folders/<id>?hard=false` | 管理员 | 删除文件夹索引；`hard=true` 时先把物理目录移动到应用回收站；同时显式清理收藏、标签、缩略图与权限记录 |
-| POST | `/api/folders/<id>/scan` | 登录（非 guest） | 手动触发重新扫描，扫描中返回 409 |
+| POST | `/api/folders` | 登录（非 guest） | 添加文件夹并触发后台异步扫描；参数 `path`、可选 `name`、`is_public`。路径必须为存在的绝对目录，入库前统一 `normpath`；重复路径（忽略大小写/分隔符/尾部分隔符）或与已有文件夹互为父子目录返回 409 |
+| PATCH | `/api/folders/<id>` | 管理员 | 更新 `name`、`path`、`is_public`；修改物理路径时校验重复/嵌套，重置扫描状态并自动重扫；`pending/scanning` 时拒绝路径修改 |
+| DELETE | `/api/folders/<id>?hard=false` | 管理员 | 删除文件夹索引；`hard=true` 时先把物理目录移动到应用回收站，并拒绝文件系统根目录及包含项目/数据库/缓存/回收站目录的路径；同时显式清理收藏、标签、缩略图记录与缓存文件、文件夹书签与权限；`pending/scanning` 时返回 409 |
+| POST | `/api/folders/<id>/scan` | 管理员、文件夹所有者或 `write` 权限 | 手动触发重新扫描；以条件更新原子抢占，`pending/scanning` 返回 409 |
 
-文件夹对象包含 `scan_status`（none/pending/scanning/completed/failed）、`scan_total`、`scan_processed`、`scan_error`。
+文件夹对象包含 `scan_status`（none/pending/scanning/completed/failed）、`scan_total`、`scan_processed`、`scan_error`。扫描线程在内存中运行，服务启动时会把遗留的 `pending/scanning` 重置为 `failed`，避免永久占用扫描状态。
 
 ### 4.3 图片管理（`/api/images`）
 
@@ -139,7 +139,7 @@ graph TD
 | GET / POST | `/api/admin/users` | 用户列表 / 新增用户 |
 | PATCH / DELETE | `/api/admin/users/<id>` | 修改角色或密码 / 删除用户（保护配置管理员、guest 与最后一个管理员） |
 | GET | `/api/admin/folders` | 全部文件夹 |
-| DELETE | `/api/admin/folders/<id>` | 删除文件夹及其图片索引（不移动物理目录） |
+| DELETE | `/api/admin/folders/<id>` | 删除文件夹及其图片索引（不移动物理目录）；与 `/api/folders/<id>` 共用清理逻辑，缩略图记录/缓存、收藏、标签、文件夹书签与权限均会清理 |
 | GET / POST | `/api/admin/permissions` | 权限列表 / 批量新增权限 |
 | DELETE | `/api/admin/permissions/<id>` | 删除权限 |
 | GET / POST | `/api/admin/settings` | 读取 / 更新 `config.yaml`（不包含 `.env` 密钥） |
@@ -547,6 +547,8 @@ graph TD
     H --> I
     I --> J[完成扫描]
 ```
+
+扫描器会记录本次遍历到的文件集合，扫描结束后删除该文件夹下不在集合中的图片索引，并同步清理其收藏、标签、缩略图记录与缓存文件。这样在修改物理路径、切换递归扫描或减少支持格式后，旧索引不会残留。扫描过程中每个批次都会确认文件夹记录仍存在，避免删除文件夹后线程继续写入。
 
 ### 8.2 缩略图生成流程
 

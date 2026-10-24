@@ -5,6 +5,7 @@ import yaml
 import os
 import shutil
 from app.routes.auth import login_required
+from app.routes.folder import BUSY_SCAN_STATUSES, purge_folder_records
 
 bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
@@ -196,25 +197,21 @@ def get_folders():
 @bp.route('/folders/<int:id>', methods=['DELETE'])
 def delete_folder(id):
     db = get_db()
+    folder = db.execute("SELECT id, path, scan_status FROM folders WHERE id = ?", (id,)).fetchone()
+    if not folder:
+        return jsonify({'error': 'Folder not found'}), 404
+
+    if folder['scan_status'] in BUSY_SCAN_STATUSES:
+        return jsonify({'error': 'Folder is being scanned; try again after it finishes'}), 409
+
     try:
-        # Check if folder exists
-        folder = db.execute("SELECT id, path FROM folders WHERE id = ?", (id,)).fetchone()
-        if not folder:
-            return jsonify({'error': 'Folder not found'}), 404
-            
-        # Delete images first. foreign_keys is not enabled, so remove dependents explicitly.
-        db.execute("DELETE FROM user_favorites WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
-        db.execute("DELETE FROM image_tags WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
-        db.execute("DELETE FROM thumbnails WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?)", (id,))
-        db.execute("DELETE FROM images WHERE folder_id = ?", (id,))
-        
-        # Delete the folder record and its permissions explicitly.
-        db.execute("DELETE FROM permissions WHERE folder_id = ?", (id,))
-        db.execute("DELETE FROM folders WHERE id = ?", (id,))
-        
+        # Removes images, favorites, tags, thumbnails (rows and cache files),
+        # folder-bound bookmarks and permissions. The physical directory is kept.
+        purge_folder_records(db, id)
         db.commit()
         return jsonify({'success': True})
     except Exception as e:
+        db.rollback()
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/permissions', methods=['GET'])

@@ -5,9 +5,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Folder, Setting, Plus, Delete, Edit, Warning, Pointer, RefreshLeft } from '@element-plus/icons-vue'
 import { useHotkeyStore, DEFAULT_HOTKEYS } from '@/stores/hotkey'
 import { useAuthStore } from '@/stores/auth'
+import { useFolderStore } from '@/stores/folder'
 
 const hotkeyStore = useHotkeyStore()
 const authStore = useAuthStore()
+const folderStore = useFolderStore()
 const hotkeys = computed(() => hotkeyStore.hotkeys)
 const recordingHotkey = ref<string | null>(null)
 const hotkeyLabels: Record<string, string> = {
@@ -249,7 +251,7 @@ const saveFolder = async () => {
     }
 
     const payload = {
-      path: folderForm.value.path,
+      path: folderForm.value.path.trim(),
       name: folderForm.value.name.trim() || undefined,
       is_public: folderForm.value.is_public
     }
@@ -297,6 +299,8 @@ const saveFolder = async () => {
     showFolderDialog.value = false
     fetchFolders()
     fetchPermissions()
+    // 侧边栏与图片页共用同一文件夹状态，管理页改动后立即同步。
+    await folderStore.fetchFolders()
   } catch (err: any) {
     ElMessage.error(err.response?.data?.error || '操作失败')
   }
@@ -344,9 +348,10 @@ const handleDeleteFolder = async (id: number) => {
     ElMessage.success('文件夹关联已解除')
     fetchFolders()
     fetchPermissions()
-  } catch (err) {
+    await folderStore.fetchFolders()
+  } catch (err: any) {
     if (err !== 'cancel') {
-      ElMessage.error('删除失败')
+      ElMessage.error('删除失败: ' + (err.response?.data?.error || err.message))
     }
   }
 }
@@ -371,6 +376,7 @@ const handleHardDeleteFolder = async (folder: any) => {
     ElMessage.success('文件夹及其物理文件已成功删除')
     fetchFolders()
     fetchPermissions()
+    await folderStore.fetchFolders()
   } catch (err: any) {
     if (err !== 'cancel') {
       ElMessage.error('物理删除失败: ' + (err.response?.data?.error || err.message))

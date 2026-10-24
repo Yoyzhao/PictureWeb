@@ -141,6 +141,11 @@ export const useImageStore = defineStore('image', () => {
     fetchImages(true)
   })
 
+  // 管理页可能增删了文件夹，返回图片视图时重新拉取，避免继续展示已删除文件夹的图片。
+  watch(showAdminView, (visible) => {
+    if (!visible && !showTrash.value && !shouldSkipAutoFetch()) fetchImages(true)
+  })
+
   // Typing in the search box should not trigger one request per keystroke.
   watchDebounced(searchQuery, () => {
     if (shouldSkipAutoFetch()) return

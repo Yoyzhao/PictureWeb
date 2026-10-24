@@ -4,6 +4,7 @@
 
 | Bug ID | 标题 | 阶段 | 层级 | 症状关键词 | 错误签名 | 根因类别 | 状态 | 关联 Bug |
 |--------|------|------|------|------------|----------|----------|------|----------|
+| Bug-005 | 文件夹添加/扫描/移除存在索引冲突、并发与孤儿数据 | 文件夹生命周期检查 | backend/frontend | 重复文件夹、嵌套目录、图片为空、扫描卡住、删除残留、根目录删除 | Folder already exists；Scan already in progress；Folder is being scanned | 路径与状态管理 | 已解决 | Bug-003、Bug-004 |
 | Bug-004 | 书签按钮无激活状态且再次点击无法取消 | 5C-前端实现 | frontend | 书签、已书签、取消书签、重复创建 | 无（UI 状态未绑定） | 状态同步 | 已解决 | 无 |
 | Bug-003 | 瀑布流移动弹窗未排除图片自身文件夹 | 5C-前端实现 | frontend | 移动图片、自身文件夹、目标文件夹可选 | already in the target folder | 状态同步 | 已解决 | 无 |
 | Bug-002 | 灯箱移动真实图片总是报 Errno 13（开发后端沙箱启动） | 7-联调 | integration | 灯箱移动、Errno 13、Permission denied、moved=0 | `[Errno 13] Permission denied` | 环境权限 | 已解决（环境） | 无 |

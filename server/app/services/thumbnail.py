@@ -181,6 +181,23 @@ def clear_trash_thumbnails(cache_key):
                     pass
 
 
+def clear_image_thumbnails(image_id):
+    """Remove cached thumbnails for an image in all sizes and formats.
+
+    Uses the cache key directly so records left by an older CACHE_DIR or file
+    format do not keep orphan files on disk after the image row is deleted.
+    """
+    cache_dir = current_app.config['CACHE_DIR']
+    for size_type in ('small', 'medium'):
+        for ext in ('webp', 'jpg'):
+            path = os.path.join(cache_dir, size_type, f"{image_id}.{ext}")
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+
 _prebuild_lock = threading.Lock()
 
 
