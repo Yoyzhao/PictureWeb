@@ -239,3 +239,22 @@ servy-cli status --name="PictureWeb"
 - **烟测**：`/api/health` 200、`/api/settings` 200、匿名 `/api/folders` 返回公开文件夹 `BG`、匿名 `/api/images` 返回 43 张公开图片、首页 `index.html` 引用新构建资源 `index-Da-Lftjn.js` / `index-Bl2zFTq.css`；匿名 `/api/bookmarks` 返回 401。
 - **登录说明**：生产 `.env` 中的管理员密码与现有生产库密码不一致，使用 `.env` 密码登录返回 401（既有状态，非本次部署引入）；如需同步，需用户确认后执行 `init_db.py --reset-admin-password`。
 - **注意**：`web/dist` 中保留了旧哈希静态资源，当前 `index.html` 仅引用新资源，不影响访问，可在下次部署时清理。
+
+## 12. 本次部署记录（2026-10-25 13:05，M4 视频支持）
+
+- **目标目录**：`D:\Workspace\_deploy\PicGallery`；更新前 `PictureWeb` 服务已处于 Stopped，更新后仍为 Stopped（当前终端无管理员权限，无法启动服务）。
+- **部署内容**：
+  - `server/app` 全量镜像（含新增 `services/video.py`、媒体字段迁移、`routes/image.py`、`routes/bookmarks.py`）。
+  - `scripts/sql-script` 全量镜像（含 `prune_cache.py`、`remux_videos.py`、`prebuild_thumbnails.py --media`）。
+  - `web/dist` 覆盖（新入口 `index-BS9mEKpn.js`、`index-8FPCqn8E.css`、`Lightbox-CpPVIcyn.js`）。
+  - `prod_run.py`、`server/run.py`、`server/requirements.txt`、`.env.example`。
+  - 生产 `config.yaml` 追加 `SCAN_VIDEO_EXTENSIONS`、`FFMPEG_PATH`、`FFPROBE_PATH`、`VIDEO_THUMBNAIL_PREGENERATE`、`VIDEO_THUMBNAIL_TIMEOUT`、`VIDEO_PROBE_TIMEOUT`（`D:/FFmpeg` 已确认存在）。
+  - 关键文件源与副本 SHA256 一致：`video.py`、`image.py`、`thumbnail.py`、`remux_videos.py`、`prune_cache.py`。
+- **保持不变**：生产 `.env`、`data/database.db` 数据内容（仅启动迁移新增字段）、`data/` 其余数据、`F:\_PicCache`、`logs/`、`server/venv`。
+- **备份**：数据库 `data\backups\database-20261025-125858.db`（SHA256 `EF9A6390429EF6260E57CF45CD4FA05B3E6A734219B97C2249253C7351C5DA3E`）；旧代码、旧 dist、旧入口、旧脚本与配置在 `D:\Workspace\_deploy\_backup_PicGallery_20261025-125858`。
+- **迁移验证**：以生产 venv 手动启动 `prod_run.py` 完成迁移，`images` 新增 `media_type/duration/video_codec/audio_codec`，`image_bookmarks` 新增 `media_filter`，自动书签唯一索引含 `media_filter`。
+- **生产库结果**：5 文件夹、20,991 图片、204 收藏、69 回收站、2 书签、FTS docsize 20,991，均与部署前一致；`videos=0`（生产库尚无视频目录）。
+- **烟测**：`/api/health` 200、`/api/settings` 200、匿名 `/api/folders` 返回 `BG`、匿名 `/api/images` total=43、`/api/images?media_type=video` total=0、首页引用新构建资源；启动日志无 FFmpeg 缺失警告。
+- **服务状态**：验证用进程已停止，5000 端口已释放；`PictureWeb` 仍为 Stopped。需以管理员执行 `servy-cli start --name="PictureWeb"` 或 `Start-Service PictureWeb` 启动。
+- **登录说明**：生产 `.env` 管理员密码与库内密码不一致的既有问题未处理。
+- **注意**：`web/dist` 保留旧哈希资源，当前 `index.html` 只引用新资源。

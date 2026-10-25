@@ -199,25 +199,24 @@ def save_auto_bookmark():
         return jsonify({'error': error}), status
 
     snapshot = _anchor_snapshot(db, anchor_id)
+    # One automatic record per user: it always stores the most recent view context.
     existing = db.execute(
-        """
-        SELECT id FROM image_bookmarks
-        WHERE user_id = ? AND kind = 'auto' AND folder_id = ? AND is_favorites = ?
-          AND search_query = ? AND media_filter = ?
-        """,
-        (g.user['id'], folder_id, is_favorites, search_query, media_filter)
+        "SELECT id FROM image_bookmarks WHERE user_id = ? AND kind = 'auto'",
+        (g.user['id'],)
     ).fetchone()
 
     if existing:
         db.execute(
             """
             UPDATE image_bookmarks
-            SET sort_by = ?, sort_order = ?, anchor_image_id = ?, anchor_modified_time = ?,
+            SET folder_id = ?, is_favorites = ?, search_query = ?, media_filter = ?,
+                sort_by = ?, sort_order = ?, anchor_image_id = ?, anchor_modified_time = ?,
                 anchor_file_name = ?, anchor_file_size = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (sort_by, sort_order, anchor_id, snapshot['modified_time'], snapshot['file_name'],
-             snapshot['file_size'], existing['id'])
+            (folder_id, is_favorites, search_query, media_filter, sort_by, sort_order,
+             anchor_id, snapshot['modified_time'], snapshot['file_name'], snapshot['file_size'],
+             existing['id'])
         )
         bookmark_id = existing['id']
     else:

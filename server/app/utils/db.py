@@ -184,12 +184,25 @@ def migrate_db(db):
             print("Migrating database: Adding 'media_filter' column to 'image_bookmarks' table...")
             db.execute("ALTER TABLE image_bookmarks ADD COLUMN media_filter VARCHAR(10) NOT NULL DEFAULT 'all'")
 
-        # The automatic bookmark key now includes media_filter, so each media filter
-        # keeps its own resume position. Rebuild the partial unique index.
+        # The automatic resume position is global per user: one row that always
+        # carries the latest view context. Old databases may hold one row per
+        # (folder, favorites, search, media) combination, so consolidate first.
         db.execute("DROP INDEX IF EXISTS idx_image_bookmarks_auto")
+        db.execute("""
+            DELETE FROM image_bookmarks
+            WHERE kind = 'auto' AND id NOT IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY user_id ORDER BY updated_at DESC, id DESC
+                    ) AS rn
+                    FROM image_bookmarks
+                    WHERE kind = 'auto'
+                ) WHERE rn = 1
+            )
+        """)
         db.executescript("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_image_bookmarks_auto
-                ON image_bookmarks(user_id, folder_id, is_favorites, search_query, media_filter)
+                ON image_bookmarks(user_id)
                 WHERE kind = 'auto';
             CREATE INDEX IF NOT EXISTS idx_images_media_type ON images(media_type);
         """)

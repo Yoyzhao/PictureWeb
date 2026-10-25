@@ -306,7 +306,10 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery, media
       <div class="content-header">
           <h2 class="current-folder">{{ currentTitle }}</h2>
           <div class="view-options">
-              <span class="item-count">{{ mediaCountLabel }}</span>
+              <span class="item-count">
+                <span class="count-long">{{ mediaCountLabel }}</span>
+                <span class="count-short">{{ total }}</span>
+              </span>
               <el-radio-group v-model="mediaFilter" size="small" class="media-filter-radio">
                   <el-radio-button
                     v-for="option in mediaFilterOptions"
@@ -512,6 +515,7 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery, media
     position: relative;
     overflow: hidden; /* 防止外层出现滚动条 */
     background: var(--bg-body); /* 确保背景色统一 */
+    container-type: inline-size;
 }
 
 .fixed-header-container {
@@ -562,6 +566,51 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery, media
     border: 1px solid var(--border-color);
     border-radius: var(--radius-pill);
     padding: 4px 10px;
+}
+
+.count-short {
+    display: none;
+}
+
+/* 侧边栏展开会压缩内容区宽度，按容器宽度而不是视口宽度切换布局。 */
+@container (max-width: 1150px) {
+    .content-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .view-options {
+        width: 100%;
+        justify-content: flex-start;
+        gap: 8px;
+    }
+}
+
+/* 平板/窄内容区：操作按钮改为图标，计数缩短，保证控件单行排列。 */
+@container (max-width: 880px) {
+    .grid-toggle-btn,
+    .save-bookmark-btn {
+        padding: 5px 9px;
+    }
+
+    .grid-toggle-btn span,
+    .save-bookmark-btn span {
+        display: none;
+    }
+
+    .count-long {
+        display: none;
+    }
+
+    .count-short {
+        display: inline;
+    }
+
+    .item-count {
+        padding: 4px 9px;
+        font-variant-numeric: tabular-nums;
+    }
 }
 
 .sort-select {

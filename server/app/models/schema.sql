@@ -135,7 +135,10 @@ CREATE TABLE IF NOT EXISTS image_bookmarks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_image_bookmarks_user ON image_bookmarks(user_id, kind, updated_at);
--- idx_image_bookmarks_auto is created in migrate_db() after old databases gain media_filter.
+-- One automatic resume position per user; manual bookmarks stay multiple.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_image_bookmarks_auto
+    ON image_bookmarks(user_id)
+    WHERE kind = 'auto';
 
 -- Trash table
 CREATE TABLE IF NOT EXISTS trash (
