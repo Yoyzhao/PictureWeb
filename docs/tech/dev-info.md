@@ -32,6 +32,7 @@
 | 后端框架 | Flask 3.0.0 + Flask-Cors 4.0.0 | Werkzeug 3.1.9、Jinja2 3.1.6 |
 | 数据库 | SQLite3（随 Python 内置） | 测试库 `data/db/database.db` |
 | 图片处理 | Pillow 12.2.0 | 缩略图生成 |
+| 视频处理 | FFmpeg / ffprobe N-124437（`D:\FFmpeg`） | M4 视频封面与元数据；生产服务需在 `config.yaml` 配置绝对路径 |
 | 安全/配置库 | itsdangerous 2.2.0、python-dotenv 1.0.1 | Token 签名与 `.env` 加载 |
 | 文件监听 | watchdog 6.0.0（已列入依赖，当前代码未接入文件监听） | 扫描由手动/新增文件夹触发 |
 
@@ -136,6 +137,11 @@
 | `THUMBNAIL_PREGENERATE` | 扫描完成后是否后台预生成小尺寸缩略图 | `config.yaml` | 否 |
 | `SCAN_RECURSIVE` | 是否递归扫描 | `config.yaml` | 否 |
 | `SCAN_EXTENSIONS` | 扫描的图片后缀 | `config.yaml` | 否 |
+| `SCAN_VIDEO_EXTENSIONS` | 扫描的视频后缀（M4 规划，未实现） | `config.yaml` | 否 |
+| `FFMPEG_PATH` | FFmpeg 可执行文件路径（M4 规划，未实现） | `config.yaml` | 否 |
+| `FFPROBE_PATH` | ffprobe 可执行文件路径（M4 规划，未实现） | `config.yaml` | 否 |
+| `VIDEO_THUMBNAIL_PREGENERATE` | 扫描后是否后台预生成视频封面（M4 规划，未实现） | `config.yaml` | 否 |
+| `VIDEO_THUMBNAIL_TIMEOUT` | 视频抽帧超时秒数（M4 规划，未实现） | `config.yaml` | 否 |
 | `ENABLE_PRELOAD` | Lightbox 预加载开关 | `config.yaml` | 否 |
 | `HOTKEYS.*` | 图片浏览快捷键映射 | `config.yaml` | 否 |
 
@@ -193,6 +199,8 @@
 | `python` | 是 | 3.12.7 / 3.13.13 | 后端运行、脚本、数据库检查（项目 venv 用 3.12.7） |
 | `node` | 是 | v24.9.0 | 前端构建与开发服务器 |
 | `npm` | 是 | 11.19.0 | 前端依赖与脚本 |
+| `ffmpeg` | 是 | N-124437 | 视频抽帧/转封装（M4） |
+| `ffprobe` | 是 | N-124437 | 视频元数据探测（M4） |
 | `fd` | 未探测到 | - | 文件名/路径检索（可用 `Get-ChildItem` 或 Glob 替代） |
 | `jq` | 未探测到 | - | JSON 处理（可用 PowerShell `ConvertFrom-Json` 替代） |
 
@@ -227,3 +235,6 @@
 6. **无自动化测试、无 ESLint 配置**：回归依赖人工，质量门控能力不足。
 7. **独立 API 契约文档尚未建立**：`PictureWeb技术架构文档.md` 第 4 节已按当前代码更新；`docs/tech/api-contract.md` 尚未单独维护，复杂接口迭代前按需补建。
 8. **时间字段口径混用**：SQLite `CURRENT_TIMESTAMP` 为 UTC、`modified_time` 为本地时间；排序、统计、跨时区展示可能偏差。
+9. **FFmpeg 路径在服务环境可能不可见**：开发终端可调用 `D:\FFmpeg\ffmpeg.exe`；生产 Windows 服务账号的 PATH 可能不同。M4 需在 `config.yaml` 配置 `FFMPEG_PATH`/`FFPROBE_PATH` 绝对路径，并在启动时检查。
+10. **移动端外部播放器深链依赖客户端环境**：Android `intent://` 需要 Chromium 内核浏览器与已安装 VLC；iOS `vlc-x-callback://` 需要 VLC 且版本支持。深链失败时必须回退“复制播放地址”，并在真机验证前不宣称通过。
+11. **客户端视频缓存边界**：浏览器视频正文缓存可通过 `Cache-Control: no-store` 抑制，Web 应用不生成视频副本；外部播放器自身的缓冲/缓存由播放器管理，无法由本项目清理。

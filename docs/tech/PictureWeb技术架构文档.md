@@ -192,6 +192,8 @@ graph TD
 
 ### 6.1 数据模型定义
 
+> **M4 规划（未实现）**：`images` 将新增 `media_type`、`duration`、`video_codec`、`audio_codec`；`image_bookmarks` 将新增 `media_filter`。决策见 `docs/tech/arch/ADR-001-视频支持与媒体模型.md`，执行细节见 `docs/plan/tasks/M4/STEP-视频支持.md`；实施完成后同步本节与 API 清单。
+
 ```mermaid
 erDiagram
     USERS ||--o{ FOLDERS : owns
