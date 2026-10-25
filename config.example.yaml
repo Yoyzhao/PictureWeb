@@ -13,6 +13,12 @@ THUMBNAIL_QUALITY: 90           # 缩略图质量 (1-100)
 THUMBNAIL_PREGENERATE: true     # 扫描完成后后台预生成小尺寸缩略图
 SCAN_RECURSIVE: true            # 是否递归扫描文件夹
 SCAN_EXTENSIONS: ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff" # 扫描的图片后缀名
+SCAN_VIDEO_EXTENSIONS: ".mp4,.m4v,.webm,.mov,.mkv,.avi,.wmv,.flv" # 扫描的视频后缀名
+FFMPEG_PATH: "ffmpeg"           # 视频封面抽帧；Windows 服务环境建议写绝对路径，如 "D:/FFmpeg/ffmpeg.exe"
+FFPROBE_PATH: "ffprobe"         # 视频元数据探测；建议与 FFMPEG_PATH 同目录
+VIDEO_THUMBNAIL_PREGENERATE: true  # 扫描完成后后台低并发预生成视频封面
+VIDEO_THUMBNAIL_TIMEOUT: 20     # 单个视频抽帧子进程超时（秒）
+VIDEO_PROBE_TIMEOUT: 10         # 单个视频元数据探测超时（秒）
 ENABLE_PRELOAD: true            # Lightbox 原图预加载
 
 # 快捷键设置

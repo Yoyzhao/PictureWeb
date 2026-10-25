@@ -20,11 +20,14 @@ export interface Bookmark {
   folder_name: string | null
   is_favorites: boolean
   search_query: string
+  media_filter: 'all' | 'image' | 'video'
   sort_by: string
   sort_order: 'ASC' | 'DESC'
   anchor_image_id: number
   anchor_file_name: string | null
   image_file_name: string | null
+  anchor_media_type?: 'image' | 'video' | null
+  anchor_duration?: number | null
   anchor_exists: boolean
   created_at: string
   updated_at: string
@@ -53,6 +56,7 @@ export const useBookmarkStore = defineStore('bookmark', () => {
     folder_id: folderStore.currentFolderId ?? 0,
     is_favorites: imageStore.showOnlyFavorites ? 1 : 0,
     search_query: imageStore.searchQuery || '',
+    media_filter: imageStore.mediaFilter,
     sort_by: imageStore.sortBy,
     sort_order: imageStore.sortOrder
   })
@@ -107,7 +111,8 @@ export const useBookmarkStore = defineStore('bookmark', () => {
     const sameView = candidates.find(item =>
       item.folder_id === context.folder_id &&
       !!item.is_favorites === !!context.is_favorites &&
-      (item.search_query || '') === (context.search_query || '')
+      (item.search_query || '') === (context.search_query || '') &&
+      (item.media_filter || 'all') === context.media_filter
     )
     if (sameView) return sameView
     return candidates.reduce((latest, item) => (item.id > latest.id ? item : latest), candidates[0])
@@ -139,7 +144,7 @@ export const useBookmarkStore = defineStore('bookmark', () => {
     const context = currentContext()
     const key = [
       context.folder_id, context.is_favorites, context.search_query,
-      context.sort_by, context.sort_order, anchorId
+      context.media_filter, context.sort_by, context.sort_order, anchorId
     ].join('|')
     if (key === lastAutoKey) return
 
@@ -152,6 +157,7 @@ export const useBookmarkStore = defineStore('bookmark', () => {
       const sameView = now.folder_id === context.folder_id &&
         now.is_favorites === context.is_favorites &&
         now.search_query === context.search_query &&
+        now.media_filter === context.media_filter &&
         now.sort_by === context.sort_by &&
         now.sort_order === context.sort_order
       if (!sameView) return

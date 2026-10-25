@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import api from '@/api'
-import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading, Rank, InfoFilled, CollectionTag, View, Hide } from '@element-plus/icons-vue'
+import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading, Rank, InfoFilled, CollectionTag, View, Hide, Monitor, Link, Download } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import type { Image as ImageItem } from '@/stores/image'
 import { useImageStore } from '@/stores/image'
@@ -12,6 +12,14 @@ import { useHotkeyStore } from '@/stores/hotkey'
 import { useUIStore } from '@/stores/ui'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import ImageInfoDialog from './ImageInfoDialog.vue'
+import {
+  buildRawUrl,
+  copyPlayUrl,
+  detectPlatform,
+  downloadM3U,
+  downloadOriginal,
+  openInVlc
+} from '@/utils/externalPlayer'
 
 const props = defineProps<{
   visible: boolean
@@ -38,6 +46,65 @@ const canEdit = computed(() => !!authStore.user && authStore.user.role !== 'gues
 const isImageBookmarked = computed(() =>
   !!props.image && bookmarkStore.bookmarkedImageIds.has(props.image.id)
 )
+
+const isVideo = computed(() => props.image?.media_type === 'video')
+const videoError = ref(false)
+const videoRef = ref<HTMLVideoElement | null>(null)
+const videoPoster = computed(() =>
+  props.image ? `/api/images/${props.image.id}/thumbnail?size=medium` : ''
+)
+const platform = detectPlatform()
+
+const videoFormatHint = computed(() => {
+  const format = String(props.image?.format || '').toLowerCase()
+  if (format === 'flv') {
+    return 'FLV 是 Flash 容器，现代浏览器已不再支持；请用本地播放器（如 VLC）打开'
+  }
+  if (['mkv', 'avi', 'wmv'].includes(format)) {
+    return '该容器通常不被浏览器支持；请用本地播放器（如 VLC）打开'
+  }
+  return '可用本地播放器（如 VLC）打开这个视频，不会下载文件'
+})
+
+const formatDuration = (seconds?: number | null) => {
+  const total = Math.floor(Number(seconds) || 0)
+  if (total <= 0) return ''
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const secs = total % 60
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`
+}
+
+const handleCopyPlayUrl = async () => {
+  if (!props.image) return
+  const ok = await copyPlayUrl(buildRawUrl(props.image.id))
+  if (ok) {
+    ElMessage.success('播放地址已复制，可粘贴到播放器的“网络串流”')
+  } else {
+    ElMessage.warning('复制失败，请手动复制地址栏中的播放链接')
+  }
+}
+
+const handleOpenVlc = () => {
+  if (!props.image) return
+  if (platform === 'desktop') {
+    // Desktops cannot launch a local player from the browser; fall back to copying.
+    handleCopyPlayUrl()
+    return
+  }
+  openInVlc(props.image.id, props.image.file_name)
+}
+
+const handleDownloadM3U = () => {
+  if (!props.image) return
+  downloadM3U(props.image.id, props.image.file_name)
+}
+
+const handleDownloadOriginal = () => {
+  if (!props.image) return
+  downloadOriginal(props.image.id, props.image.file_name)
+}
 
 const showMoveDialog = ref(false)
 const targetFolderId = ref<number | null>(null)
@@ -109,7 +176,7 @@ watch(() => props.image?.id, (newId) => {
 
   // Only preload raw for reasonably sized next images; large originals hurt bandwidth and decode time.
   const nextImg = props.nextImage
-  if (nextImg && (nextImg.file_size || 0) <= MAX_RAW_PRELOAD_BYTES) {
+  if (nextImg && nextImg.media_type !== 'video' && (nextImg.file_size || 0) <= MAX_RAW_PRELOAD_BYTES) {
     schedulePreload(() => {
       if (props.image?.id !== newId || props.nextImage?.id !== nextImg.id) return
       const rawUrl = `/api/images/${nextImg.id}/raw`
@@ -177,6 +244,8 @@ const getDistance = (touches: TouchList) => {
 }
 
 const handleTouchStart = (e: TouchEvent) => {
+  // Video controls need their own touch handling (seek bar); do not treat it as a swipe.
+  if (isVideo.value) return
   if (e.touches.length === 1) {
     touchStartX.value = e.touches[0].clientX
     touchStartY.value = e.touches[0].clientY
@@ -256,13 +325,14 @@ const imageStyle = computed(() => ({
   transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value}) rotate(${rotate.value}deg)`
 }))
 
-// Reset transformations when image changes
+// Reset transformations when the media changes
 watch(() => props.image?.id, () => {
   scale.value = 1
   rotate.value = 0
   translateX.value = 0
   translateY.value = 0
   imageLoaded.value = false
+  videoError.value = false
 })
 
 let wheelRaf = 0
@@ -271,6 +341,8 @@ let pendingScale = 1
 const handleWheel = (e: WheelEvent) => {
   if (!props.visible) return
   e.preventDefault()
+  // Videos keep their native controls; wheel zoom only applies to images.
+  if (isVideo.value) return
 
   if (!wheelRaf) pendingScale = scale.value
   const delta = e.deltaY > 0 ? -0.1 : 0.1
@@ -326,7 +398,7 @@ const handleDelete = async () => {
 
   try {
     await ElMessageBox.confirm(
-      '确定要删除这张图片吗？',
+      '确定要删除这个项目吗？',
       '提示',
       {
         confirmButtonText: '确定',
@@ -456,6 +528,16 @@ const handleMove = async () => {
   }
 }
 
+const toggleVideoPlayback = () => {
+  const element = videoRef.value
+  if (!element) return
+  if (element.paused) {
+    element.play().catch(() => { /* autoplay/permission failures are non-fatal */ })
+  } else {
+    element.pause()
+  }
+}
+
 const handleKeydown = (e: KeyboardEvent) => {
   if (!props.visible) return
   // Dialogs own the keyboard while they are open; shortcuts must not mutate the gallery underneath.
@@ -463,6 +545,18 @@ const handleKeydown = (e: KeyboardEvent) => {
 
   const key = e.key
   const hk = hotkeys.value
+
+  if (isVideo.value) {
+    if (key === ' ') {
+      // Native controls already handle space when the video element has focus.
+      if ((e.target as HTMLElement | null)?.tagName === 'VIDEO') return
+      e.preventDefault()
+      toggleVideoPlayback()
+      return
+    }
+    // Image-only shortcuts do not apply to video.
+    if (key === hk.ZOOM_IN || key === hk.ZOOM_OUT || key === hk.ROTATE || key === hk.RESET) return
+  }
 
   if (key === hk.CLOSE) emit('close')
   if (key === hk.PREV && props.hasPrev) goPrev()
@@ -518,13 +612,47 @@ onUnmounted(() => {
 
     <div class="loading-overlay" v-if="loading">
       <el-icon class="is-loading"><Loading /></el-icon>
-      <span>正在加载更多图片...</span>
+      <span>正在加载更多内容...</span>
     </div>
 
     <div class="lightbox-content">
       <transition :name="transitionName">
         <div :key="imageUrl" class="image-wrapper">
+          <template v-if="isVideo">
+            <div v-if="videoError" class="video-error" @click.stop>
+              <el-icon class="video-error-icon"><Monitor /></el-icon>
+              <p class="video-error-title">该格式无法在浏览器中直接播放</p>
+              <p class="video-error-hint">{{ videoFormatHint }}</p>
+              <div class="video-error-actions">
+                <el-button type="primary" size="small" @click.stop="handleOpenVlc">
+                  {{ platform === 'desktop' ? '复制播放地址' : '用 VLC 打开' }}
+                </el-button>
+                <el-button v-if="platform !== 'desktop'" size="small" @click.stop="handleCopyPlayUrl">
+                  复制播放地址
+                </el-button>
+                <el-button v-if="platform === 'desktop'" size="small" @click.stop="handleDownloadM3U">
+                  下载播放列表
+                </el-button>
+                <el-button size="small" @click.stop="handleDownloadOriginal">下载原文件</el-button>
+              </div>
+            </div>
+            <video
+              v-else
+              ref="videoRef"
+              :src="imageUrl"
+              :poster="videoPoster"
+              class="lightbox-video"
+              controls
+              playsinline
+              preload="metadata"
+              @click.stop="toggleUI"
+              @error="videoError = true"
+              @touchstart.stop
+              @touchend.stop
+            ></video>
+          </template>
           <img
+            v-else
             :src="imageUrl"
             :alt="image?.file_name"
             :style="imageStyle"
@@ -548,9 +676,22 @@ onUnmounted(() => {
       </div>
 
       <div class="lightbox-toolbar" @touchstart.stop @touchend.stop @click.stop>
-        <button title="旋转" aria-label="旋转" @click="handleRotate"><el-icon><RefreshRight /></el-icon></button>
-        <button title="重置" aria-label="重置视图" @click="handleReset"><el-icon><FullScreen /></el-icon></button>
-        <button title="裁剪（开发中）" aria-label="裁剪（开发中）" class="disabled"><el-icon><Crop /></el-icon></button>
+        <button v-if="!isVideo" title="旋转" aria-label="旋转" @click="handleRotate"><el-icon><RefreshRight /></el-icon></button>
+        <button v-if="!isVideo" title="重置" aria-label="重置视图" @click="handleReset"><el-icon><FullScreen /></el-icon></button>
+        <button v-if="!isVideo" title="裁剪（开发中）" aria-label="裁剪（开发中）" class="disabled"><el-icon><Crop /></el-icon></button>
+        <el-dropdown v-if="isVideo" trigger="click" class="player-dropdown">
+          <button title="用本地播放器打开" aria-label="用本地播放器打开" class="player-btn">
+            <el-icon><Monitor /></el-icon>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-if="platform !== 'desktop'" :icon="Monitor" @click="handleOpenVlc">用 VLC 打开</el-dropdown-item>
+              <el-dropdown-item :icon="Link" @click="handleCopyPlayUrl">复制播放地址</el-dropdown-item>
+              <el-dropdown-item v-if="platform === 'desktop'" :icon="Download" @click="handleDownloadM3U">下载播放列表（M3U）</el-dropdown-item>
+              <el-dropdown-item :icon="Download" @click="handleDownloadOriginal">下载原文件</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <button title="重命名" aria-label="重命名" @click="handleRename"><el-icon><Edit /></el-icon></button>
         <button v-if="canEdit" title="移动" aria-label="移动" @click="openMoveDialog"><el-icon><Rank /></el-icon></button>
         <button
@@ -595,12 +736,16 @@ onUnmounted(() => {
         <span id="meta-filename" :title="image.file_name">{{ truncatedFileName }}</span>
         <span class="meta-divider">|</span>
         <span id="meta-resolution">{{ image.width }} x {{ image.height }}</span>
+        <template v-if="isVideo && formatDuration(image.duration)">
+          <span class="meta-divider">|</span>
+          <span id="meta-duration">时长 {{ formatDuration(image.duration) }}</span>
+        </template>
         <span class="meta-divider">|</span>
         <span id="meta-filesize">{{ fileSizeMB }}</span>
       </div>
     </div>
 
-    <el-dialog v-model="showMoveDialog" title="移动图片" width="400px" append-to-body>
+    <el-dialog v-model="showMoveDialog" title="移动文件" width="400px" append-to-body>
       <el-form label-position="top">
         <el-form-item label="选择目标文件夹">
           <el-select v-model="targetFolderId" placeholder="请选择" style="width: 100%">
@@ -695,6 +840,82 @@ onUnmounted(() => {
 
 .lightbox-content img.is-interacting {
     transition: none;
+}
+
+.lightbox-video {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    background: #000;
+    border-radius: 4px;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+}
+
+.video-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 28px 32px;
+    max-width: min(520px, calc(100vw - 40px));
+    text-align: center;
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(15, 18, 22, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-lg);
+    backdrop-filter: blur(10px);
+}
+
+.video-error-icon {
+    font-size: 44px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.video-error-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.video-error-hint {
+    margin: 0;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.65);
+    line-height: 1.6;
+}
+
+.video-error-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.player-dropdown {
+    display: flex;
+}
+
+.player-btn {
+    /* Matches the toolbar buttons; the dropdown wraps it, so restate the sizing. */
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.86);
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+}
+
+.player-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
 }
 
 /* 图片切换动画 - 向左滑动 (下一页) */
@@ -954,6 +1175,11 @@ onUnmounted(() => {
         width: 44px;
         height: 44px;
         font-size: 18px;
+    }
+
+    .player-btn {
+        width: 44px;
+        height: 44px;
     }
 
     .image-meta {

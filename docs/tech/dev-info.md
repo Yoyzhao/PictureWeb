@@ -108,7 +108,7 @@
 
 | 组件 | 版本 | 连接方式/备注 |
 |------|------|---------------|
-| 主数据库（测试） | SQLite3 | `data/db/database.db`；4 个文件夹、21,159 条图片记录、3 个用户（2026-10-25 实测） |
+| 主数据库（测试） | SQLite3 | `data/db/database.db`；`images` 表含 `media_type/duration/video_codec/audio_codec`，`image_bookmarks` 含 `media_filter`；4 个文件夹、21,159 条媒体记录、3 个用户（2026-10-25 实测） |
 | 主数据库（生产） | SQLite3 | 部署副本 `D:\Workspace\_deploy\PicGallery\data\database.db`；不得用于测试写入 |
 | 缓存 | 无独立缓存服务 | 缩略图文件缓存 + 浏览器端预加载 |
 | 对象存储 | 无 | 直接读写本地文件系统 |
@@ -137,11 +137,12 @@
 | `THUMBNAIL_PREGENERATE` | 扫描完成后是否后台预生成小尺寸缩略图 | `config.yaml` | 否 |
 | `SCAN_RECURSIVE` | 是否递归扫描 | `config.yaml` | 否 |
 | `SCAN_EXTENSIONS` | 扫描的图片后缀 | `config.yaml` | 否 |
-| `SCAN_VIDEO_EXTENSIONS` | 扫描的视频后缀（M4 规划，未实现） | `config.yaml` | 否 |
-| `FFMPEG_PATH` | FFmpeg 可执行文件路径（M4 规划，未实现） | `config.yaml` | 否 |
-| `FFPROBE_PATH` | ffprobe 可执行文件路径（M4 规划，未实现） | `config.yaml` | 否 |
-| `VIDEO_THUMBNAIL_PREGENERATE` | 扫描后是否后台预生成视频封面（M4 规划，未实现） | `config.yaml` | 否 |
-| `VIDEO_THUMBNAIL_TIMEOUT` | 视频抽帧超时秒数（M4 规划，未实现） | `config.yaml` | 否 |
+| `SCAN_VIDEO_EXTENSIONS` | 扫描的视频后缀（默认 `.mp4,.m4v,.webm,.mov,.mkv,.avi,.wmv,.flv`） | `config.yaml` | 否 |
+| `FFMPEG_PATH` | FFmpeg 可执行文件路径（本机 `D:/FFmpeg/ffmpeg.exe`，用于视频封面抽帧） | `config.yaml` | 否 |
+| `FFPROBE_PATH` | ffprobe 可执行文件路径（本机 `D:/FFmpeg/ffprobe.exe`，用于视频元数据） | `config.yaml` | 否 |
+| `VIDEO_THUMBNAIL_PREGENERATE` | 扫描后是否后台低并发预生成视频封面 | `config.yaml` | 否 |
+| `VIDEO_THUMBNAIL_TIMEOUT` | 视频抽帧子进程超时秒数（默认 20） | `config.yaml` | 否 |
+| `VIDEO_PROBE_TIMEOUT` | 视频元数据探测超时秒数（默认 10） | `config.yaml` | 否 |
 | `ENABLE_PRELOAD` | Lightbox 预加载开关 | `config.yaml` | 否 |
 | `HOTKEYS.*` | 图片浏览快捷键映射 | `config.yaml` | 否 |
 

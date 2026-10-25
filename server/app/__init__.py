@@ -76,6 +76,18 @@ def create_app(test_config=None):
     with app.app_context():
         db.init_db()
 
+        # Video support depends on external binaries; warn but never block image features.
+        from .services.video import check_binaries, cleanup_video_temp
+        binaries = check_binaries()
+        for name in ('ffmpeg', 'ffprobe'):
+            if not binaries[name]:
+                app.logger.warning(
+                    "Video support degraded: %s not found at %s "
+                    "(configure FFMPEG_PATH/FFPROBE_PATH if it lives elsewhere)",
+                    name, binaries[f'{name}_path']
+                )
+        cleanup_video_temp()
+
     # A simple page that says hello
     @app.route('/api/health')
     def health_check():

@@ -104,16 +104,16 @@ graph TD
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/api/images` | 可选登录 | 分页列表；非管理员仅返回自己的文件夹、公开文件夹或拥有任一权限的文件夹中的图片；`is_favorite=true` 对匿名用户返回空集；支持 `folder_id`、`is_favorite`、`q`、`sort_by`、`sort_order`、`cursor` |
-| GET | `/api/images/window` | 可选登录 | 按 `anchor_id` 返回前后窗口（keyset，`before`≤100、`after`≤200），用于书签恢复与定位；锚点不在当前视图时可用 `fallback_value` 按保存的排序键定位最近位置；返回 `anchor.window_index/found/fallback` |
-| GET | `/api/images/<id>` | 可选登录 | 图片详情，附带当前用户收藏状态；需要该文件夹的读取权限（公开文件夹允许匿名） |
+| GET | `/api/images` | 可选登录 | 分页列表；非管理员仅返回自己的文件夹、公开文件夹或拥有任一权限的文件夹中的媒体；`is_favorite=true` 对匿名用户返回空集；支持 `folder_id`、`is_favorite`、`q`、`media_type`（`image`/`video`/`all`，非法值 400）、`sort_by`、`sort_order`、`cursor` |
+| GET | `/api/images/window` | 可选登录 | 按 `anchor_id` 返回前后窗口（keyset，`before`≤100、`after`≤200），用于书签恢复与定位；支持 `media_type`；锚点不在当前视图时可用 `fallback_value` 按保存的排序键定位最近位置；返回 `anchor.window_index/found/fallback` |
+| GET | `/api/images/<id>` | 可选登录 | 媒体详情，附带 `media_type`、`duration`、编码与当前用户收藏状态；需要该文件夹的读取权限（公开文件夹允许匿名） |
 | PATCH | `/api/images/<id>` | 登录（非 guest）+ `rename` 权限 | 重命名（仅 `file_name`，禁止通过该接口改 `folder_id`）；文件名必须是纯文件名 |
 | POST | `/api/images/<id>/favorite` | 登录（非 guest）+ 读取权限 | 切换当前用户收藏状态 |
-| GET | `/api/images/<id>/thumbnail?size=small\|medium` | 公开 | 读取缩略图（按需生成并缓存） |
-| GET | `/api/images/<id>/raw` | 公开 | 读取原图 |
-| GET | `/api/images/<id>/download` | 公开 | 以附件形式下载原图 |
+| GET | `/api/images/<id>/thumbnail?size=small\|medium` | 公开 | 读取缩略图（按需生成并缓存）；视频返回 FFmpeg 抽帧封面，失败返回共享占位图（不缓存长） |
+| GET | `/api/images/<id>/raw` | 公开 | 读取原图/原视频；视频按扩展名返回显式 MIME 并设置 `Cache-Control: no-store`，保留 Range（206） |
+| GET | `/api/images/<id>/download` | 公开 | 以附件形式下载原文件（视频使用正确 MIME 与文件名） |
 | POST | `/api/images/batch/move` | 登录（非 guest）+ 源/目标 `write` 权限 | 批量移动；目标目录必须存在；同名自动加后缀；返回 `moved_ids` 与逐项 `errors` |
-| POST | `/api/images/batch/delete` | 登录（非 guest）+ `delete` 权限 | 批量移动到回收站并记录元数据；返回 `deleted_ids`、`trashed`、`missing_ids`、`errors`；文件缺失时只删除索引 |
+| POST | `/api/images/batch/delete` | 登录（非 guest）+ `delete` 权限 | 批量移动到回收站并记录元数据（含媒体字段）；返回 `deleted_ids`、`trashed`、`missing_ids`、`errors`；文件缺失时只删除索引 |
 
 > 已知安全缺口：`raw`、`thumbnail`、`download` 当前未校验登录与文件夹权限，对外暴露前需补齐。
 >
@@ -123,9 +123,9 @@ graph TD
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/api/images/trash/items` | 登录 | 管理员查看全部；普通用户仅查看自己的回收站记录 |
-| GET | `/api/images/trash/<id>/thumbnail` | 登录（所有者/管理员） | 读取回收站文件缩略图 |
-| POST | `/api/images/trash/restore` | 登录（所有者/管理员）+ 原文件夹 `write` 权限 | 批量恢复；原文件夹不存在或无权限时保留在回收站并返回错误；恢复后重新插入图片、收藏与标签，返回 `restored_ids` |
+| GET | `/api/images/trash/items` | 登录 | 管理员查看全部；普通用户仅查看自己的回收站记录；返回 `media_type`、`duration`、编码字段 |
+| GET | `/api/images/trash/<id>/thumbnail` | 登录（所有者/管理员） | 读取回收站缩略图；视频失败返回共享占位图或 404，不回退原视频文件 |
+| POST | `/api/images/trash/restore` | 登录（所有者/管理员）+ 原文件夹 `write` 权限 | 批量恢复；原文件夹不存在或无权限时保留在回收站并返回错误；恢复后重新插入媒体记录（含媒体字段）、收藏与标签，返回 `restored_ids` |
 | POST | `/api/images/trash/clear` | 登录（所有者/管理员） | 彻底删除指定记录；`trash_ids` 为空时清空当前用户回收站；返回 `deleted_ids` |
 
 ### 4.5 管理接口（`/api/admin`）
@@ -192,7 +192,7 @@ graph TD
 
 ### 6.1 数据模型定义
 
-> **M4 规划（未实现）**：`images` 将新增 `media_type`、`duration`、`video_codec`、`audio_codec`；`image_bookmarks` 将新增 `media_filter`。决策见 `docs/tech/arch/ADR-001-视频支持与媒体模型.md`，执行细节见 `docs/plan/tasks/M4/STEP-视频支持.md`；实施完成后同步本节与 API 清单。
+> **M4 已实施（2026-10-25）**：`images` 已新增 `media_type`（`image`/`video`，默认 `image`）、`duration`、`video_codec`、`audio_codec`；`image_bookmarks` 已新增 `media_filter`（`all`/`image`/`video`），自动书签唯一索引包含该字段。图片与视频统一存放在 `images`，新词 `media` 泛指两者。决策见 `docs/tech/arch/ADR-001-视频支持与媒体模型.md`，执行细节见 `docs/plan/tasks/M4/STEP-视频支持.md`。
 
 ```mermaid
 erDiagram
@@ -240,6 +240,10 @@ erDiagram
         integer width
         integer height
         string format
+        string media_type
+        real duration
+        string video_codec
+        string audio_codec
         integer folder_id FK
         datetime created_at
         datetime updated_at
@@ -298,6 +302,7 @@ erDiagram
         integer folder_id
         boolean is_favorites
         string search_query
+        string media_filter
         string sort_by
         string sort_order
         integer anchor_image_id

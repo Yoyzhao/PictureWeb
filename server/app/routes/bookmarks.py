@@ -8,6 +8,7 @@ from app.routes.image import (
     ALLOWED_SORT_FIELDS,
     _image_access,
     fetch_image_window,
+    parse_media_filter,
     serialize_image,
 )
 
@@ -27,7 +28,10 @@ def _normalize_context(data):
     sort_order = (data.get('sort_order') or 'DESC').upper()
     if sort_order not in ('ASC', 'DESC'):
         sort_order = 'DESC'
-    return folder_id, is_favorites, search_query, sort_by, sort_order
+    media_filter = parse_media_filter(data.get('media_filter'))
+    if media_filter is False:
+        media_filter = None
+    return folder_id, is_favorites, search_query, sort_by, sort_order, media_filter or 'all'
 
 
 def _anchor_snapshot(db, image_id):
@@ -50,7 +54,7 @@ def _anchor_snapshot(db, image_id):
     }
 
 
-def _validate_anchor(db, user, anchor_id, folder_id, is_favorites):
+def _validate_anchor(db, user, anchor_id, folder_id, is_favorites, media_filter='all'):
     image, allowed = _image_access(db, user, anchor_id, 'read')
     if not image:
         return 'Image not found', 404
@@ -58,6 +62,10 @@ def _validate_anchor(db, user, anchor_id, folder_id, is_favorites):
         return 'Permission denied', 403
     if folder_id and image['folder_id'] != folder_id:
         return 'Image does not belong to the selected folder', 400
+    if media_filter in ('image', 'video'):
+        row = db.execute("SELECT media_type FROM images WHERE id = ?", (anchor_id,)).fetchone()
+        if row and (row['media_type'] or 'image') != media_filter:
+            return 'Image does not match the selected media filter', 400
     if is_favorites:
         favorite = db.execute(
             "SELECT 1 FROM user_favorites WHERE user_id = ? AND image_id = ?",
@@ -83,6 +91,7 @@ def _fetch_bookmark_row(db, user_id, bookmark_id):
     return db.execute(
         """
         SELECT b.*, f.name AS folder_name, i.file_name AS image_file_name,
+               i.media_type AS anchor_media_type, i.duration AS anchor_duration,
                (i.id IS NOT NULL) AS anchor_exists
         FROM image_bookmarks b
         LEFT JOIN folders f ON b.folder_id = f.id
@@ -100,6 +109,7 @@ def list_bookmarks():
     rows = db.execute(
         """
         SELECT b.*, f.name AS folder_name, i.file_name AS image_file_name,
+               i.media_type AS anchor_media_type, i.duration AS anchor_duration,
                (i.id IS NOT NULL) AS anchor_exists
         FROM image_bookmarks b
         LEFT JOIN folders f ON b.folder_id = f.id
@@ -126,8 +136,8 @@ def create_bookmark():
     except (TypeError, ValueError):
         return jsonify({'error': 'anchor_image_id is required'}), 400
 
-    folder_id, is_favorites, search_query, sort_by, sort_order = _normalize_context(data)
-    error, status = _validate_anchor(db, g.user, anchor_id, folder_id, is_favorites)
+    folder_id, is_favorites, search_query, sort_by, sort_order, media_filter = _normalize_context(data)
+    error, status = _validate_anchor(db, g.user, anchor_id, folder_id, is_favorites, media_filter)
     if error:
         return jsonify({'error': error}), status
 
@@ -136,9 +146,9 @@ def create_bookmark():
         """
         SELECT id FROM image_bookmarks
         WHERE user_id = ? AND kind = 'manual' AND folder_id = ? AND is_favorites = ?
-          AND search_query = ? AND anchor_image_id = ?
+          AND search_query = ? AND media_filter = ? AND anchor_image_id = ?
         """,
-        (g.user['id'], folder_id, is_favorites, search_query, anchor_id)
+        (g.user['id'], folder_id, is_favorites, search_query, media_filter, anchor_id)
     ).fetchone()
     if existing:
         row = _fetch_bookmark_row(db, g.user['id'], existing['id'])
@@ -156,11 +166,11 @@ def create_bookmark():
     cursor = db.execute(
         """
         INSERT INTO image_bookmarks
-            (user_id, kind, name, folder_id, is_favorites, search_query, sort_by, sort_order,
+            (user_id, kind, name, folder_id, is_favorites, search_query, media_filter, sort_by, sort_order,
              anchor_image_id, anchor_modified_time, anchor_file_name, anchor_file_size)
-        VALUES (?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (g.user['id'], name, folder_id, is_favorites, search_query, sort_by, sort_order,
+        (g.user['id'], name, folder_id, is_favorites, search_query, media_filter, sort_by, sort_order,
          anchor_id, snapshot['modified_time'], snapshot['file_name'], snapshot['file_size'])
     )
     db.commit()
@@ -183,8 +193,8 @@ def save_auto_bookmark():
     except (TypeError, ValueError):
         return jsonify({'error': 'anchor_image_id is required'}), 400
 
-    folder_id, is_favorites, search_query, sort_by, sort_order = _normalize_context(data)
-    error, status = _validate_anchor(db, g.user, anchor_id, folder_id, is_favorites)
+    folder_id, is_favorites, search_query, sort_by, sort_order, media_filter = _normalize_context(data)
+    error, status = _validate_anchor(db, g.user, anchor_id, folder_id, is_favorites, media_filter)
     if error:
         return jsonify({'error': error}), status
 
@@ -192,9 +202,10 @@ def save_auto_bookmark():
     existing = db.execute(
         """
         SELECT id FROM image_bookmarks
-        WHERE user_id = ? AND kind = 'auto' AND folder_id = ? AND is_favorites = ? AND search_query = ?
+        WHERE user_id = ? AND kind = 'auto' AND folder_id = ? AND is_favorites = ?
+          AND search_query = ? AND media_filter = ?
         """,
-        (g.user['id'], folder_id, is_favorites, search_query)
+        (g.user['id'], folder_id, is_favorites, search_query, media_filter)
     ).fetchone()
 
     if existing:
@@ -213,11 +224,11 @@ def save_auto_bookmark():
         cursor = db.execute(
             """
             INSERT INTO image_bookmarks
-                (user_id, kind, name, folder_id, is_favorites, search_query, sort_by, sort_order,
+                (user_id, kind, name, folder_id, is_favorites, search_query, media_filter, sort_by, sort_order,
                  anchor_image_id, anchor_modified_time, anchor_file_name, anchor_file_size)
-            VALUES (?, 'auto', '上次浏览', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, 'auto', '上次浏览', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (g.user['id'], folder_id, is_favorites, search_query, sort_by, sort_order,
+            (g.user['id'], folder_id, is_favorites, search_query, media_filter, sort_by, sort_order,
              anchor_id, snapshot['modified_time'], snapshot['file_name'], snapshot['file_size'])
         )
         bookmark_id = cursor.lastrowid
@@ -290,11 +301,14 @@ def restore_bookmark(id):
     before = min(max(request.args.get('before', 40, type=int), 0), 100)
     after = min(max(request.args.get('after', 80, type=int), 1), 200)
     is_favorite = 'true' if row['is_favorites'] else None
+    media_filter = row['media_filter'] if 'media_filter' in row.keys() else 'all'
+    if media_filter not in ('image', 'video'):
+        media_filter = None
 
     result = fetch_image_window(
         db, g.user, row['folder_id'] or None, is_favorite, row['search_query'],
         sort_by, sort_order, row['anchor_image_id'], fallback_value=fallback_value,
-        before=before, after=after
+        before=before, after=after, media_type=media_filter
     )
 
     return jsonify({
@@ -304,6 +318,7 @@ def restore_bookmark(id):
             'search_query': row['search_query'],
             'sort_by': sort_by,
             'sort_order': sort_order,
+            'media_filter': media_filter or 'all',
         },
         'data': [serialize_image(item) for item in result['data']],
         'total': result['total'],

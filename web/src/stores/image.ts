@@ -17,6 +17,8 @@ import { useFolderStore } from './folder'
 import { useAuthStore } from './auth'
 import { ElMessage } from 'element-plus'
 
+export type MediaFilter = 'all' | 'image' | 'video'
+
 export interface Image {
   id: number
   file_path: string
@@ -28,7 +30,14 @@ export interface Image {
   format: string
   folder_id: number
   is_favorite: boolean
+  media_type: 'image' | 'video'
+  duration: number | null
+  video_codec: string | null
+  audio_codec: string | null
 }
+
+const MEDIA_FILTER_KEY = 'picgallery.mediaFilter'
+const storedMediaFilter = typeof localStorage !== 'undefined' ? localStorage.getItem(MEDIA_FILTER_KEY) : null
 
 export const useImageStore = defineStore('image', () => {
   const images = shallowRef<Image[]>([])
@@ -44,6 +53,9 @@ export const useImageStore = defineStore('image', () => {
   const sortBy = ref('modified_time')
   const sortOrder = ref('DESC')
   const searchQuery = ref('')
+  const mediaFilter = ref<MediaFilter>(
+    storedMediaFilter === 'image' || storedMediaFilter === 'video' ? storedMediaFilter : 'all'
+  )
   const selectedImageIds = ref<number[]>([])
   const gridSize = ref<'small' | 'medium' | 'large'>('medium')
   // Anchor requested by a bookmark restore; VirtualWaterfall scrolls to it once laid out.
@@ -94,6 +106,7 @@ export const useImageStore = defineStore('image', () => {
         sort_by: sortBy.value,
         sort_order: sortOrder.value,
         q: searchQuery.value || undefined,
+        media_type: mediaFilter.value === 'all' ? undefined : mediaFilter.value,
         cursor: reset ? undefined : (nextCursor.value || undefined)
       }, controller.signal)
 
@@ -136,9 +149,13 @@ export const useImageStore = defineStore('image', () => {
   }
 
   // Folder/filter/sort changes should react immediately.
-  watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder], () => {
+  watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, mediaFilter], () => {
     if (shouldSkipAutoFetch()) return
     fetchImages(true)
+  })
+
+  watch(mediaFilter, (value) => {
+    localStorage.setItem(MEDIA_FILTER_KEY, value)
   })
 
   // 管理页可能增删了文件夹，返回图片视图时重新拉取，避免继续展示已删除文件夹的图片。
@@ -183,6 +200,9 @@ export const useImageStore = defineStore('image', () => {
       sortBy.value = context.sort_by || 'modified_time'
       sortOrder.value = context.sort_order || 'DESC'
       searchQuery.value = context.search_query || ''
+      mediaFilter.value = context.media_filter === 'image' || context.media_filter === 'video'
+        ? context.media_filter
+        : 'all'
 
       const data = (res.data.data || []).map((img: any) => ({
         ...img,
@@ -446,6 +466,7 @@ export const useImageStore = defineStore('image', () => {
     sortBy,
     sortOrder,
     searchQuery,
+    mediaFilter,
     selectedImageIds,
     showTrash,
     fetchImages,

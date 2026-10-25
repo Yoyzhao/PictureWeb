@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, send_file, abort, g, current_app
 from app.utils.db import get_db
 from app.services.thumbnail import generate_thumbnail, generate_thumbnail_from_path, clear_trash_thumbnails
+from app.services.video import is_placeholder_path, is_video_file, video_mimetype
 from app.routes.auth import get_current_user, login_required
 from datetime import datetime
 import base64
@@ -11,6 +12,16 @@ import json
 # from send2trash import send2trash
 
 bp = Blueprint('image', __name__, url_prefix='/api/images')
+
+MEDIA_FILTERS = ('image', 'video')
+
+
+def parse_media_filter(value):
+    """Return 'image'/'video'/None (all); False when the value is not supported."""
+    if value is None or value == '' or value == 'all':
+        return None
+    normalized = str(value).lower()
+    return normalized if normalized in MEDIA_FILTERS else False
 
 
 def encode_cursor(payload):
@@ -108,7 +119,7 @@ def image_select(user):
     return "SELECT i.*, 0 as is_fav FROM images i", []
 
 
-def image_filters(user, folder_id, is_favorite, q):
+def image_filters(user, folder_id, is_favorite, q, media_type=None):
     """Shared WHERE conditions and params for list/window queries."""
     conditions = []
     params = []
@@ -130,6 +141,10 @@ def image_filters(user, folder_id, is_favorite, q):
     if folder_id:
         conditions.append("i.folder_id = ?")
         params.append(folder_id)
+
+    if media_type in MEDIA_FILTERS:
+        conditions.append("i.media_type = ?")
+        params.append(media_type)
 
     if is_favorite == 'true':
         # Anonymous users have no favorites; do not fall back to the full list.
@@ -155,11 +170,17 @@ def serialize_image(img):
     if img_dict.get('modified_time') and hasattr(img_dict['modified_time'], 'isoformat'):
         img_dict['modified_time'] = img_dict['modified_time'].isoformat()
     img_dict['is_favorite'] = bool(img_dict.get('is_fav', 0))
+    img_dict['media_type'] = img_dict.get('media_type') or 'image'
+    if img_dict.get('duration') is not None:
+        try:
+            img_dict['duration'] = round(float(img_dict['duration']), 3)
+        except (TypeError, ValueError):
+            img_dict['duration'] = None
     return img_dict
 
 
 def fetch_image_window(db, user, folder_id, is_favorite, q, sort_by, sort_order,
-                       anchor_id, fallback_value=None, before=40, after=80):
+                       anchor_id, fallback_value=None, before=40, after=80, media_type=None):
     """Return a keyset window centered on an anchor image.
 
     The anchor is resolved by id first so a rename/move/sort change still lands on the
@@ -167,7 +188,7 @@ def fetch_image_window(db, user, folder_id, is_favorite, q, sort_by, sort_order,
     sort value is used to locate the nearest remaining position.
     """
     base_query, params = image_select(user)
-    conditions, filter_params = image_filters(user, folder_id, is_favorite, q)
+    conditions, filter_params = image_filters(user, folder_id, is_favorite, q, media_type)
     params.extend(filter_params)
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
     and_or_where = " AND " if conditions else " WHERE "
@@ -450,6 +471,10 @@ def batch_delete_images():
                     'width': image['width'],
                     'height': image['height'],
                     'format': image['format'],
+                    'media_type': image['media_type'],
+                    'duration': image['duration'],
+                    'video_codec': image['video_codec'],
+                    'audio_codec': image['audio_codec'],
                     'favorites': [f['user_id'] for f in favorites],
                     'tags': [t['tag_id'] for t in tags]
                 }
@@ -513,19 +538,21 @@ def get_trash_items():
         # Serialize datetime
         if d.get('deleted_at') and hasattr(d['deleted_at'], 'isoformat'):
             d['deleted_at'] = d['deleted_at'].isoformat()
-            
-        # Parse metadata to get width/height for waterfall layout
+
+        # Parse metadata for layout and media details; old records lack media fields.
+        meta = {}
         if d.get('metadata'):
             try:
                 meta = json.loads(d['metadata'])
-                d['width'] = meta.get('width', 0)
-                d['height'] = meta.get('height', 0)
-            except:
-                d['width'] = 0
-                d['height'] = 0
-        else:
-            d['width'] = 0
-            d['height'] = 0
+            except (TypeError, ValueError):
+                meta = {}
+
+        d['width'] = meta.get('width', 0)
+        d['height'] = meta.get('height', 0)
+        d['media_type'] = meta.get('media_type') or ('video' if is_video_file(d.get('file_name') or '') else 'image')
+        d['duration'] = meta.get('duration')
+        d['video_codec'] = meta.get('video_codec')
+        d['audio_codec'] = meta.get('audio_codec')
         result.append(d)
         
     return jsonify(result)
@@ -545,15 +572,22 @@ def get_trash_thumbnail(id):
     size = request.args.get('size', 'medium')
     try:
         thumb_path = generate_thumbnail_from_path(trash_item['trash_path'], id, size)
-        if not thumb_path:
-            raise FileNotFoundError('thumbnail generation failed')
-        return send_file(thumb_path, max_age=3600, conditional=True)
     except Exception as e:
         current_app.logger.error(f"Thumbnail generation failed for trash item {id}: {e}")
-        # Fallback to original if thumbnail fails
-        if os.path.exists(trash_item['trash_path']):
-            return send_file(trash_item['trash_path'], max_age=3600, conditional=True)
+        thumb_path = None
+
+    if thumb_path and os.path.exists(thumb_path):
+        # Placeholders must not be cached by the browser.
+        max_age = 0 if is_placeholder_path(thumb_path) else 3600
+        return send_file(thumb_path, max_age=max_age, conditional=True)
+
+    # Videos must never fall back to the original file: that would stream the whole video.
+    if is_video_file(trash_item['trash_path']):
         abort(404)
+
+    if os.path.exists(trash_item['trash_path']):
+        return send_file(trash_item['trash_path'], max_age=3600, conditional=True)
+    abort(404)
 
 @bp.route('/trash/restore', methods=['POST'])
 @login_required
@@ -620,13 +654,24 @@ def restore_trash_images():
                 if file_size is None:
                     file_size = os.path.getsize(original_path)
 
-                # Re-insert into images table (works even if metadata was missing)
+                # Re-insert into images table (works even if metadata was missing).
+                # Media fields are written back so a restored video stays a video.
+                media_type = metadata.get('media_type')
+                if media_type not in MEDIA_FILTERS:
+                    media_type = 'video' if is_video_file(original_path) else 'image'
+
                 cursor = db.execute(
-                    "INSERT INTO images (file_path, file_name, file_size, modified_time, width, height, format, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    """
+                    INSERT INTO images (file_path, file_name, file_size, modified_time, width, height,
+                                        format, media_type, duration, video_codec, audio_codec, folder_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
                     (original_path.replace('\\', '/'), os.path.basename(original_path),
                      file_size, mod_time,
                      metadata.get('width', 0) or 0, metadata.get('height', 0) or 0,
                      metadata.get('format') or os.path.splitext(original_path)[1].lstrip('.').lower(),
+                     media_type, metadata.get('duration'),
+                     metadata.get('video_codec'), metadata.get('audio_codec'),
                      folder_id)
                 )
                 new_image_id = cursor.lastrowid
@@ -723,6 +768,9 @@ def get_images():
     sort_by = request.args.get('sort_by', 'modified_time')
     sort_order = request.args.get('sort_order', 'DESC').upper()
     q = request.args.get('q', type=str)
+    media_type = parse_media_filter(request.args.get('media_type'))
+    if media_type is False:
+        return jsonify({'error': 'media_type must be image or video'}), 400
     
     # Validate sort_by to prevent SQL injection
     if sort_by not in ALLOWED_SORT_FIELDS:
@@ -742,7 +790,7 @@ def get_images():
     
     # Base query and shared filters (also used by the bookmark window query).
     query, params = image_select(user)
-    conditions, filter_params = image_filters(user, folder_id, is_favorite, q)
+    conditions, filter_params = image_filters(user, folder_id, is_favorite, q, media_type)
     params.extend(filter_params)
 
     if conditions:
@@ -807,6 +855,9 @@ def get_images_window():
     sort_order = request.args.get('sort_order', 'DESC').upper()
     q = request.args.get('q', type=str)
     fallback_value = request.args.get('fallback_value', type=str)
+    media_type = parse_media_filter(request.args.get('media_type'))
+    if media_type is False:
+        return jsonify({'error': 'media_type must be image or video'}), 400
 
     if sort_by not in ALLOWED_SORT_FIELDS:
         sort_by = 'modified_time'
@@ -818,7 +869,8 @@ def get_images_window():
 
     result = fetch_image_window(
         db, user, folder_id, is_favorite, q, sort_by, sort_order,
-        anchor_id, fallback_value=fallback_value, before=before, after=after
+        anchor_id, fallback_value=fallback_value, before=before, after=after,
+        media_type=media_type
     )
 
     return jsonify({
@@ -831,7 +883,8 @@ def get_images_window():
             'is_favorites': is_favorite == 'true',
             'search_query': q or '',
             'sort_by': sort_by,
-            'sort_order': sort_order
+            'sort_order': sort_order,
+            'media_filter': media_type or 'all'
         }
     })
 
@@ -927,9 +980,11 @@ def update_image(id):
 def get_image_thumbnail(id):
     size_type = request.args.get('size', 'small')
     thumb_path = generate_thumbnail(id, size_type)
-    
+
     if thumb_path and os.path.exists(thumb_path):
-        return send_file(thumb_path, max_age=86400, conditional=True)
+        # The shared placeholder must not be cached: the real poster may replace it shortly.
+        max_age = 0 if is_placeholder_path(thumb_path) else 86400
+        return send_file(thumb_path, max_age=max_age, conditional=True)
     else:
         # Return a placeholder or 404
         return jsonify({'error': 'Thumbnail generation failed'}), 404
@@ -937,7 +992,7 @@ def get_image_thumbnail(id):
 @bp.route('/<int:id>/raw', methods=['GET'])
 def get_image_raw(id):
     db = get_db()
-    image = db.execute("SELECT file_path FROM images WHERE id = ?", (id,)).fetchone()
+    image = db.execute("SELECT file_path, media_type FROM images WHERE id = ?", (id,)).fetchone()
     
     if not image:
         return jsonify({'error': 'Image not found'}), 404
@@ -945,13 +1000,25 @@ def get_image_raw(id):
     file_path = image['file_path']
     if not os.path.exists(file_path):
         return jsonify({'error': 'File not found on disk'}), 404
-        
+
+    if image['media_type'] == 'video':
+        # Explicit MIME so browsers/external players recognise the container, and
+        # no-store so the video body is not written into the browser disk cache.
+        response = send_file(
+            file_path,
+            mimetype=video_mimetype(file_path) or 'application/octet-stream',
+            conditional=True,
+            max_age=0
+        )
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+
     return send_file(file_path, max_age=3600, conditional=True)
 
 @bp.route('/<int:id>/download', methods=['GET'])
 def download_image(id):
     db = get_db()
-    image = db.execute("SELECT file_path, file_name FROM images WHERE id = ?", (id,)).fetchone()
+    image = db.execute("SELECT file_path, file_name, media_type FROM images WHERE id = ?", (id,)).fetchone()
     
     if not image:
         return jsonify({'error': 'Image not found'}), 404
@@ -959,9 +1026,12 @@ def download_image(id):
     file_path = image['file_path']
     if not os.path.exists(file_path):
         return jsonify({'error': 'File not found on disk'}), 404
+
+    mimetype = video_mimetype(file_path) if image['media_type'] == 'video' else None
         
     return send_file(
         file_path,
+        mimetype=mimetype,
         as_attachment=True,
         download_name=image['file_name'],
         max_age=3600,

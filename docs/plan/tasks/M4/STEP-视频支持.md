@@ -669,9 +669,21 @@
 
 ## 阶段完成结果
 
-- **实际产出**：待实施
-- **方案偏差**：待实施
-- **外溢发现**：待实施
-- **遗留项**：待实施
-- **验收摘要**：待实施
+- **实际产出**：`images` 新增 `media_type`/`duration`/`video_codec`/`audio_codec`，`image_bookmarks` 新增 `media_filter` 并重建自动书签唯一索引；新增 `server/app/services/video.py`；扫描器媒体类型判定、ffprobe 元数据与旋转处理；`thumbnail.py` 视频封面分支、共享占位图、500ms 锁超时与后台队列；`prebuild_thumbnails.py --media`；新增 `scripts/sql-script/prune_cache.py`；接口 `media_type` 筛选、书签 `media_filter`、raw MIME 与 `no-store`、回收站媒体字段与恢复；前端筛选控件、视频角标、灯箱 `<video>` 与错误层、信息/回收站/书签展示；新增 `web/src/utils/externalPlayer.ts` 与灯箱播放器菜单。
+- **方案偏差**：
+  1. 未采用“移动端 M3U 主路径”，改为 Android `intent://`、iOS `vlc-x-callback://.../stream`，M3U 仅桌面可选（与 ADR-001 一致）。
+  2. 新增配置键 `VIDEO_PROBE_TIMEOUT`（默认 10s），用于限制扫描阶段 ffprobe 超时。
+  3. 新索引 `idx_image_bookmarks_auto`、`idx_images_media_type` 由 `migrate_db()` 创建，而非写在 `schema.sql`，否则旧库在补列前执行会报 `no such column`。
+  4. 视频封面失败与占位图统一输出 JPEG（`placeholder/video.jpg`），避免在 WebP 编码失败时再引入依赖。
+- **外溢发现**：
+  1. Chrome 可直接播放 H.264 封装的 MKV（实测无 error），因此未把 MKV 视为必然不可播；错误层以 `<video>` 的 `error` 事件为准（坏文件已实测触发）。
+  2. 回收站缩略图原实现会回退原文件，视频场景会传输整个文件；已改为视频返回占位图或 404。
+  3. FLV 容器（H.264/AAC）在所有现代浏览器中均不可播，与分辨率无关；用户 4K 素材为 FLV，只能走本地播放器交接。
+  4. Bug-006：`acquire_poster_slot()` 阻塞获取后未返回 `True`，预生成线程把已获取误判为失败，泄漏信号量并永久占用 `_prebuild_lock`，导致所有视频封面退化为占位图；已修复并用 `py-spy` 栈与重扫日志验证。
+- **遗留项**：
+  1. Android/iOS 深链未做真机验证，需用户协助；复制播放地址为兜底。
+  2. 媒体读取接口鉴权缺口按用户决定另立项。
+  3. 视频重命名改扩展名后 MIME 可能回退 `application/octet-stream`（已知限制）。
+  4. 生产副本未同步；同步时需确认部署机存在 `D:/FFmpeg`。
+- **验收摘要**：迁移后 21,159 行图片、3 条书签完整；临时混合目录 6 个文件扫描正确（含 90° 旋转宽高交换）；MP4/WebM/MKV 生成 WebP 封面，坏文件返回占位图；API 40 项断言通过（筛选/分页/窗口/书签/Range 206/MIME/no-store/回收站往返）；浏览器筛选、角标、MP4 播放、错误层与图片灯箱回归通过，console 无 error；`py_compile`、`npm run check`、`npm run build` 通过；开发库已恢复并通过 `prune_cache.py --dry-run`。
 - **关联记录**：`CHG-20261025-04`、`ADR-001`

@@ -2,6 +2,46 @@
 
 > 记录需留痕的 Bug 现象、根因、修复与验证证据。索引见 `bug-index.md`。
 
+## [Bug-006] 视频封面预生成永久卡死，所有视频缩略图退化为占位图
+
+- **ID**：Bug-006
+- **日期**：2026-10-25
+- **发生阶段/切片**：M4 视频支持（5D 后端 / 7 联调）
+- **严重程度**：High
+- **关联任务/变更**：T-030、T-034、CHG-20261025-04
+- **影响范围**：所有视频封面（网格/书签/回收站）；后台缩略图预生成线程；后续新增文件夹的预生成
+- **现象**：
+  1. 用户新增 `F:\视频\4K` 后，10 个视频卡片全部显示深色占位图，接口返回 `image/jpeg` 且 `Cache-Control: no-cache, max-age=0`；
+  2. 后端日志没有 `Thumbnail prebuild finished`、`Video poster prebuild finished`；
+  3. 之后新增文件夹时日志提示 `Thumbnail prebuild already running; skipped folder 29`，预生成永久停止；
+  4. 单独在另一个进程调用 `generate_thumbnail()` 可正常生成 WebP，说明 FFmpeg/文件本身没有问题。
+- **复现步骤**：
+  1. 扫描包含视频的文件夹，触发扫描后预生成；
+  2. 请求任意视频 `/thumbnail?size=small`，返回占位图且 `cache` 为 `no-cache, max-age=0`；
+  3. 再次新增/重扫文件夹，日志出现 `Thumbnail prebuild already running`；
+  4. `py-spy dump` 该服务进程，可见 `thumb-prebuild-<id>` 线程阻塞在 `acquire_poster_slot`。
+- **根因**：`server/app/services/video.py::acquire_poster_slot()` 只调用 `_poster_semaphore.acquire()`，**没有返回值**（Python 返回 `None`）；`thumbnail.py::_generate_video_thumbnail()` 用 `if not acquired` 判断是否拿到信号量。预生成路径 `background=True` 因此把“已获取”误判为“未获取”，直接返回共享占位图且不执行 `finally` 中的 `release_poster_slot()`：
+  1. 第一个视频泄漏一个信号量占用；
+  2. 第二个视频在 `acquire_poster_slot()` 上永久阻塞；
+  3. 线程同时持有 `_prebuild_lock`，导致后续所有文件夹跳过预生成。
+- **解决方式**：`acquire_poster_slot()` 获取成功后返回 `True`，使后台路径正确进入生成与 `finally` 释放；重启开发后端清空已泄漏的信号量状态。
+- **修复产物/版本**：`server/app/services/video.py`（工作区，未提交 commit）
+- **验证证据**：
+  - `py-spy dump` 定位：`thumb-prebuild-27` 阻塞在 `acquire_poster_slot (video.py:348)`；
+  - 修复重启后重扫文件夹 28：日志出现 `Thumbnail prebuild finished for folder 28: 10 images` 与 `Video poster prebuild finished for folder 28: 10 videos`；
+  - 删除 32836、32842 的封面后重扫，两张 WebP 均重新生成；浏览器 HEAD 返回 `image/webp`、`public, max-age=86400`；
+  - 该进程内后续缩略图请求不再排队，说明信号量无泄漏。
+- **受影响阶段重验**：T-030 封面与缓存生命周期、T-034 联调；浏览器视频卡片封面恢复真实截图。
+- **关联关系**：无（与 FLV 容器不可播是两件独立问题：后者是浏览器能力限制，不是缺陷）
+- **状态**：已解决
+
+### 时间线
+
+- 2026-10-25 11:32：用户浏览 4K 视频文件夹时全部封面为占位图，预生成日志缺失。
+- 2026-10-25 11:38：`py-spy dump` 显示预生成线程阻塞在信号量 acquire，确认信号量泄漏。
+- 2026-10-25 11:39：修复 `acquire_poster_slot()` 返回值并重启后端。
+- 2026-10-25 11:41：重扫验证预生成完整结束，封面恢复真实 WebP。
+
 ## [Bug-005] 文件夹添加/扫描/移除存在索引冲突、并发与孤儿数据
 
 - **ID**：Bug-005

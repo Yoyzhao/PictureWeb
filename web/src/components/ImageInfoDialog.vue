@@ -36,6 +36,18 @@ const formatTime = (value: any) => {
   return isNaN(date.getTime()) ? '-' : date.toLocaleString()
 }
 
+const isVideo = computed(() => details.value?.media_type === 'video')
+
+const formatDuration = (seconds?: number | null) => {
+  const total = Math.floor(Number(seconds) || 0)
+  if (total <= 0) return '-'
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const secs = total % 60
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`
+}
+
 // Always fetch the latest record so the physical path stays correct after moves/renames.
 watch(() => props.modelValue, async (visible) => {
   if (!visible) return
@@ -58,7 +70,7 @@ watch(() => props.modelValue, async (visible) => {
 <template>
   <el-dialog
     :model-value="modelValue"
-    title="图片详情"
+    title="媒体详情"
     width="500px"
     append-to-body
     @update:model-value="emit('update:modelValue', $event)"
@@ -69,8 +81,24 @@ watch(() => props.modelValue, async (visible) => {
         <span class="value">{{ details.file_name }}</span>
       </div>
       <div class="detail-item">
+        <span class="label">类型</span>
+        <span class="value">{{ isVideo ? '视频' : '图片' }}</span>
+      </div>
+      <div v-if="isVideo" class="detail-item">
+        <span class="label">时长</span>
+        <span class="value">{{ formatDuration(details.duration) }}</span>
+      </div>
+      <div class="detail-item">
         <span class="label">分辨率</span>
         <span class="value">{{ details.width || 0 }} x {{ details.height || 0 }}</span>
+      </div>
+      <div v-if="isVideo" class="detail-item">
+        <span class="label">视频编码</span>
+        <span class="value">{{ details.video_codec ? details.video_codec.toUpperCase() : '-' }}</span>
+      </div>
+      <div v-if="isVideo" class="detail-item">
+        <span class="label">音频编码</span>
+        <span class="value">{{ details.audio_codec ? details.audio_codec.toUpperCase() : '无音轨' }}</span>
       </div>
       <div class="detail-item">
         <span class="label">文件大小</span>

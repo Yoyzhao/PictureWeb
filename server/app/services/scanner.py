@@ -4,6 +4,7 @@ from PIL import Image
 from flask import current_app
 from app.utils.db import get_db
 from app.services.thumbnail import clear_image_thumbnails, start_folder_thumbnail_prebuild
+from app.services.video import container_name, is_video_file, probe_video
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff'}
 
@@ -12,6 +13,15 @@ def is_image_file(filename):
     extensions = current_app.config.get('SCAN_EXTENSIONS', '.jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff').lower().split(',')
     ext = os.path.splitext(filename)[1].lower()
     return ext in extensions
+
+
+def media_type_of(filename):
+    """Return 'image', 'video' or None for files outside the configured extensions."""
+    if is_image_file(filename):
+        return 'image'
+    if is_video_file(filename):
+        return 'video'
+    return None
 
 
 def _file_key(path):
@@ -87,30 +97,30 @@ def scan_folder(folder_path, folder_id):
         print(f"Scanning folder: {folder_path} (ID: {folder_id}), Recursive: {recursive}")
 
         # 2. Pre-count files for progress bar
-        image_files = []
+        media_files = []
         if recursive:
             for root, dirs, files in os.walk(folder_path):
                 for file in files:
-                    if is_image_file(file):
-                        image_files.append((root, file))
+                    if media_type_of(file):
+                        media_files.append((root, file))
                         scanned_keys.add(_file_key(os.path.join(root, file)))
         else:
             try:
                 files = os.listdir(folder_path)
                 for file in files:
                     file_path = os.path.join(folder_path, file)
-                    if os.path.isfile(file_path) and is_image_file(file):
-                        image_files.append((folder_path, file))
+                    if os.path.isfile(file_path) and media_type_of(file):
+                        media_files.append((folder_path, file))
                         scanned_keys.add(_file_key(file_path))
             except Exception as e:
                 print(f"Error listing directory {folder_path}: {e}")
 
-        total_files = len(image_files)
+        total_files = len(media_files)
         db.execute("UPDATE folders SET scan_total = ? WHERE id = ?", (total_files, folder_id))
         db.commit()
 
         # 3. Process files and update progress
-        for i, (root, file) in enumerate(image_files):
+        for i, (root, file) in enumerate(media_files):
             if not _folder_exists(db, folder_id):
                 print(f"Scan aborted: folder {folder_id} was deleted while scanning")
                 return {'processed': count, 'removed': 0, 'total_current': 0}
@@ -129,7 +139,7 @@ def scan_folder(folder_path, folder_id):
         db.execute("UPDATE folders SET scan_status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (folder_id,))
         db.commit()
 
-        print(f"Scan complete. Processed {count} images. Removed {removed_count} missing images.")
+        print(f"Scan complete. Processed {count} media files. Removed {removed_count} missing files.")
 
         # Generate missing small thumbnails in the background so first browsing is not thumbnail-bound.
         if current_app.config.get('THUMBNAIL_PREGENERATE', True):
@@ -148,8 +158,9 @@ def scan_folder(folder_path, folder_id):
 
 
 def process_file(db, root, file, folder_id):
-    """Process a single file and add/update in database. Returns 1 if processed, 0 otherwise."""
-    if not is_image_file(file):
+    """Process a single image/video file and add or update its row. Returns 1 if indexed."""
+    media_type = media_type_of(file)
+    if not media_type:
         return 0
 
     file_path = os.path.join(root, file)
@@ -157,7 +168,7 @@ def process_file(db, root, file, folder_id):
     file_path = file_path.replace('\\', '/')
 
     try:
-        # Check if image already exists
+        # Check if the file already exists
         cur = db.execute("SELECT id, modified_time FROM images WHERE file_path = ?", (file_path,))
         existing = cur.fetchone()
 
@@ -172,41 +183,37 @@ def process_file(db, root, file, folder_id):
 
             # Compare timestamps
             if existing_mtime != modified_time:
-                # Get image dimensions
-                try:
-                    with Image.open(file_path) as img:
-                        width, height = img.size
-                        fmt = img.format
-                except Exception:
-                    width, height = 0, 0
-                    fmt = 'UNKNOWN'
+                metadata = _read_metadata(file_path, media_type)
 
                 db.execute(
                     """
-                    UPDATE images 
-                    SET file_size = ?, modified_time = ?, width = ?, height = ?, format = ?, updated_at = CURRENT_TIMESTAMP
+                    UPDATE images
+                    SET file_size = ?, modified_time = ?, width = ?, height = ?, format = ?,
+                        media_type = ?, duration = ?, video_codec = ?, audio_codec = ?,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (file_size, modified_time, width, height, fmt, existing['id'])
+                    (file_size, modified_time, metadata['width'], metadata['height'],
+                     metadata['format'], media_type, metadata['duration'],
+                     metadata['video_codec'], metadata['audio_codec'], existing['id'])
                 )
+                # A changed video needs a fresh poster frame; drop the cached cover.
+                if media_type == 'video':
+                    _remove_thumbnail_files(db, existing['id'])
                 return 1
         else:
-            # Insert new image
-            try:
-                with Image.open(file_path) as img:
-                    width, height = img.size
-                    fmt = img.format
-            except Exception as e:
-                print(f"Error reading image {file_path}: {e}")
-                width, height = 0, 0
-                fmt = 'UNKNOWN'
+            # Insert new media row
+            metadata = _read_metadata(file_path, media_type)
 
             db.execute(
                 """
-                INSERT INTO images (file_path, file_name, file_size, modified_time, width, height, format, folder_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO images (file_path, file_name, file_size, modified_time, width, height,
+                                    format, media_type, duration, video_codec, audio_codec, folder_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (file_path, file, file_size, modified_time, width, height, fmt, folder_id)
+                (file_path, file, file_size, modified_time, metadata['width'], metadata['height'],
+                 metadata['format'], media_type, metadata['duration'],
+                 metadata['video_codec'], metadata['audio_codec'], folder_id)
             )
             return 1
 
@@ -214,3 +221,35 @@ def process_file(db, root, file, folder_id):
         print(f"Error processing file {file_path}: {e}")
 
     return 0
+
+
+def _read_metadata(file_path, media_type):
+    """Return the media columns shared by images and videos."""
+    if media_type == 'video':
+        probed = probe_video(file_path)
+        return {
+            'width': probed.get('width') or 0,
+            'height': probed.get('height') or 0,
+            'format': probed.get('format') or container_name(file_path) or 'UNKNOWN',
+            'duration': probed.get('duration'),
+            'video_codec': probed.get('video_codec'),
+            'audio_codec': probed.get('audio_codec'),
+        }
+
+    try:
+        with Image.open(file_path) as img:
+            width, height = img.size
+            fmt = img.format
+    except Exception as e:
+        print(f"Error reading image {file_path}: {e}")
+        width, height = 0, 0
+        fmt = 'UNKNOWN'
+
+    return {
+        'width': width,
+        'height': height,
+        'format': fmt,
+        'duration': None,
+        'video_codec': None,
+        'audio_codec': None,
+    }

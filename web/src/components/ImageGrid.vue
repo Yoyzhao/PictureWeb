@@ -5,7 +5,7 @@ import { useFolderStore } from '@/stores/folder'
 import { useAuthStore } from '@/stores/auth'
 import { storeToRefs } from 'pinia'
 import { useIntersectionObserver } from '@vueuse/core'
-import { Star, More, Loading, InfoFilled, Download, Delete, Rank, Edit, CollectionTag, Select, View, Hide } from '@element-plus/icons-vue'
+import { Star, More, Loading, InfoFilled, Download, Delete, Rank, Edit, CollectionTag, Select, View, Hide, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import VirtualWaterfall from './common/VirtualWaterfall.vue'
 import ImageInfoDialog from './ImageInfoDialog.vue'
@@ -19,7 +19,7 @@ const { showGridImageInfo } = storeToRefs(uiStore)
 const multiSelectMode = ref(false)
 const {
   images, imagesVersion, loading, total, showOnlyFavorites, sortBy, sortOrder,
-  searchQuery, selectedImageIds, gridSize, scrollAnchorId, scrollAnchorVersion
+  searchQuery, mediaFilter, selectedImageIds, gridSize, scrollAnchorId, scrollAnchorVersion
 } = storeToRefs(imageStore)
 const currentViewAnchorId = ref<number | null>(null)
 const currentPositionBookmarked = computed(() =>
@@ -58,7 +58,7 @@ const selectedImage = ref<any>(null)
 
 const handleBatchDelete = () => {
   ElMessageBox.confirm(
-    `确定要将选中的 ${selectedImageIds.value.length} 张图片移至回收站吗？`,
+    confirmDeleteText(selectedImageIds.value.length),
     '批量删除',
     {
       confirmButtonText: '确定',
@@ -72,7 +72,7 @@ const handleBatchDelete = () => {
 
 const handleSingleDelete = (img: any) => {
   ElMessageBox.confirm(
-    `确定要将图片 "${img.file_name}" 移至回收站吗？`,
+    `确定要将“${img.file_name}”移至回收站吗？`,
     '确认删除',
     {
       confirmButtonText: '确定',
@@ -191,10 +191,29 @@ const showDetails = (img: any) => {
 
 const currentTitle = computed(() => {
   if (showOnlyFavorites.value) return '收藏夹'
-  if (currentFolderId.value === undefined) return '所有照片'
+  if (currentFolderId.value === undefined) return '所有媒体'
   const folder = folders.value.find(f => f.id === currentFolderId.value)
   return folder ? folder.name : '未知文件夹'
 })
+
+const mediaCountLabel = computed(() => {
+  if (mediaFilter.value === 'image') return `共 ${total.value} 张图片`
+  if (mediaFilter.value === 'video') return `共 ${total.value} 个视频`
+  return `共 ${total.value} 项`
+})
+
+const emptyLabel = computed(() => {
+  if (showOnlyFavorites.value) return '收藏夹还是空的'
+  if (mediaFilter.value === 'image') return '当前文件夹下没有图片'
+  if (mediaFilter.value === 'video') return '当前文件夹下没有视频'
+  return '当前文件夹下没有媒体文件'
+})
+
+const mediaFilterOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'image', label: '图片' },
+  { value: 'video', label: '视频' }
+]
 
 const scrollableRef = ref<HTMLElement | null>(null)
 
@@ -232,8 +251,21 @@ const formatDate = (value: any) => {
 const imageAspectRatio = (img: any) => {
   const width = Number(img.width) || 0
   const height = Number(img.height) || 0
-  return width > 0 && height > 0 ? `${width} / ${height}` : '4 / 3'
+  if (width > 0 && height > 0) return `${width} / ${height}`
+  return img.media_type === 'video' ? '16 / 9' : '4 / 3'
 }
+
+const formatDuration = (seconds: number | null | undefined) => {
+  const total = Math.floor(Number(seconds) || 0)
+  if (total <= 0) return ''
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const secs = total % 60
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`
+}
+
+const confirmDeleteText = (count: number) => `确定要将选中的 ${count} 个项目移至回收站吗？`
 
 const toggleFavorite = (img: any) => {
   imageStore.toggleFavorite(img)
@@ -260,8 +292,8 @@ const toggleMultiSelect = () => {
   imageStore.clearSelection()
 }
 
-// Changing folder/search/sort leaves selection mode to avoid accidental picking in a new view.
-watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () => {
+// Changing folder/search/sort/filter leaves selection mode to avoid accidental picking in a new view.
+watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery, mediaFilter], () => {
   if (!multiSelectMode.value) return
   multiSelectMode.value = false
   imageStore.clearSelection()
@@ -274,7 +306,14 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () =
       <div class="content-header">
           <h2 class="current-folder">{{ currentTitle }}</h2>
           <div class="view-options">
-              <span class="item-count">共 {{ total }} 张图片</span>
+              <span class="item-count">{{ mediaCountLabel }}</span>
+              <el-radio-group v-model="mediaFilter" size="small" class="media-filter-radio">
+                  <el-radio-button
+                    v-for="option in mediaFilterOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >{{ option.label }}</el-radio-button>
+              </el-radio-group>
               <el-button
                 v-if="!isGuest"
                 size="small"
@@ -355,17 +394,23 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () =
           <div v-if="multiSelectMode" class="card-checkbox" @click.stop="toggleSelection(img.id)">
               <el-checkbox :model-value="isSelected(img.id)" :aria-label="`选择 ${img.file_name}`"></el-checkbox>
           </div>
-          <img
-            :src="getThumbnailUrl(img.id)"
-            :loading="index < 15 ? 'eager' : 'lazy'"
-            :fetchpriority="index < 15 ? 'high' : 'auto'"
-            decoding="async"
-            :width="img.width || undefined"
-            :height="img.height || undefined"
-            :style="{ aspectRatio: imageAspectRatio(img) }"
-            :alt="img.file_name"
-            :title="img.file_name"
-          />
+          <div class="thumb-wrap">
+            <img
+              :src="getThumbnailUrl(img.id)"
+              :loading="index < 15 ? 'eager' : 'lazy'"
+              :fetchpriority="index < 15 ? 'high' : 'auto'"
+              decoding="async"
+              :width="img.width || undefined"
+              :height="img.height || undefined"
+              :style="{ aspectRatio: imageAspectRatio(img) }"
+              :alt="img.file_name"
+              :title="img.file_name"
+            />
+            <div v-if="img.media_type === 'video'" class="video-badge" aria-hidden="true">
+              <el-icon><VideoPlay /></el-icon>
+              <span v-if="formatDuration(img.duration)">{{ formatDuration(img.duration) }}</span>
+            </div>
+          </div>
           <div class="card-overlay">
               <button v-if="isLoggedIn && !isGuest" class="action-btn fav-btn" :class="{ active: img.is_favorite }" :aria-label="img.is_favorite ? '取消收藏' : '收藏'" @click.stop="toggleFavorite(img)">
                   <el-icon><Star /></el-icon>
@@ -377,10 +422,10 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () =
                   <template #dropdown>
                       <el-dropdown-menu>
                           <el-dropdown-item :icon="InfoFilled" @click="showDetails(img)">查看详情</el-dropdown-item>
-                          <el-dropdown-item :icon="Download" @click="handleDownload(img)">下载原图</el-dropdown-item>
+                          <el-dropdown-item :icon="Download" @click="handleDownload(img)">下载原文件</el-dropdown-item>
                           <el-dropdown-item v-if="!isGuest" :icon="Edit" @click="handleRename(img)">重命名</el-dropdown-item>
-                          <el-dropdown-item v-if="!isGuest" :icon="Rank" @click="openMoveDialog(img.id)">移动图片</el-dropdown-item>
-                          <el-dropdown-item v-if="!isGuest" :icon="Delete" @click="handleSingleDelete(img)" divided style="color: #f56c6c">删除图片</el-dropdown-item>
+                          <el-dropdown-item v-if="!isGuest" :icon="Rank" @click="openMoveDialog(img.id)">移动</el-dropdown-item>
+                          <el-dropdown-item v-if="!isGuest" :icon="Delete" @click="handleSingleDelete(img)" divided style="color: #f56c6c">删除</el-dropdown-item>
                       </el-dropdown-menu>
                   </template>
               </el-dropdown>
@@ -388,6 +433,7 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () =
           <div class="img-info" v-if="showGridImageInfo && gridSize !== 'small'">
             <div class="img-name">{{ img.file_name }}</div>
             <div class="img-meta">
+              <template v-if="img.media_type === 'video' && formatDuration(img.duration)">{{ formatDuration(img.duration) }} | </template>
               {{ img.width }} x {{ img.height }} | {{ (img.file_size / 1024 / 1024).toFixed(2) }} MB | 
               {{ formatDate(img.modified_time) }}
             </div>
@@ -404,21 +450,21 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () =
     </div>
 
     <div v-if="images.length === 0 && !loading" class="empty-state">
-      <el-empty :description="showOnlyFavorites ? '收藏夹还是空的' : '当前文件夹下没有照片'"></el-empty>
+      <el-empty :description="emptyLabel"></el-empty>
     </div>
     
     <div v-if="loading && images.length > 0" class="load-more">
       <el-icon class="is-loading"><Loading /></el-icon>
     </div>
     <div v-else-if="images.length >= total && total > 0" class="load-more">
-      <span>没有更多图片了</span>
+      <span>没有更多项目了</span>
     </div>
 
     <footer class="status-bar">
         <div class="status-info">
             <span>当前文件夹: <strong>{{ currentTitle }}</strong></span>
             <span class="separator">|</span>
-            <span>图片数量: <strong>{{ total }}</strong></span>
+            <span>媒体数量: <strong>{{ total }}</strong></span>
             <span class="separator">|</span>
             <span>已选中: <strong>{{ selectedImageIds.length }}</strong></span>
         </div>
@@ -432,7 +478,7 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () =
     </footer>
 
     <!-- 移动文件夹对话框 -->
-    <el-dialog v-model="showMoveDialog" title="移动图片" width="400px">
+    <el-dialog v-model="showMoveDialog" title="移动文件" width="400px">
       <el-form label-position="top">
         <el-form-item label="选择目标文件夹">
           <el-select v-model="targetFolderId" placeholder="请选择" style="width: 100%">
@@ -656,6 +702,34 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () =
     transition: transform var(--motion-base) var(--ease-out);
 }
 
+.thumb-wrap {
+    position: relative;
+    display: block;
+    flex: 0 0 auto;
+    overflow: hidden;
+}
+
+.video-badge {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: var(--radius-pill);
+    background: rgba(15, 18, 22, 0.72);
+    color: #fff;
+    font-size: 11px;
+    line-height: 1.2;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+}
+
+.video-badge .el-icon {
+    font-size: 13px;
+}
+
 .img-info {
     padding: 9px 10px;
     flex: 1;
@@ -706,6 +780,9 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery], () =
     .view-options {
         flex-wrap: wrap;
         gap: 8px;
+    }
+    .media-filter-radio {
+        order: 0;
     }
     .grid-size-radio {
         order: 1;

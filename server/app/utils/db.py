@@ -153,6 +153,7 @@ def migrate_db(db):
                 folder_id INTEGER NOT NULL DEFAULT 0,
                 is_favorites INTEGER NOT NULL DEFAULT 0,
                 search_query TEXT NOT NULL DEFAULT '',
+                media_filter VARCHAR(10) NOT NULL DEFAULT 'all',
                 sort_by VARCHAR(20) NOT NULL DEFAULT 'modified_time',
                 sort_order VARCHAR(4) NOT NULL DEFAULT 'DESC',
                 anchor_image_id INTEGER NOT NULL,
@@ -164,9 +165,33 @@ def migrate_db(db):
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_image_bookmarks_user ON image_bookmarks(user_id, kind, updated_at);
+        """)
+
+        # 3.2 Media model (M4): videos share the images table, existing rows stay images.
+        image_columns = [row['name'] for row in db.execute("PRAGMA table_info(images)").fetchall()]
+        for column, definition in (
+            ('media_type', "VARCHAR(10) NOT NULL DEFAULT 'image'"),
+            ('duration', 'REAL'),
+            ('video_codec', 'VARCHAR(20)'),
+            ('audio_codec', 'VARCHAR(20)'),
+        ):
+            if column not in image_columns:
+                print(f"Migrating database: Adding '{column}' column to 'images' table...")
+                db.execute(f"ALTER TABLE images ADD COLUMN {column} {definition}")
+
+        bookmark_columns = [row['name'] for row in db.execute("PRAGMA table_info(image_bookmarks)").fetchall()]
+        if 'media_filter' not in bookmark_columns:
+            print("Migrating database: Adding 'media_filter' column to 'image_bookmarks' table...")
+            db.execute("ALTER TABLE image_bookmarks ADD COLUMN media_filter VARCHAR(10) NOT NULL DEFAULT 'all'")
+
+        # The automatic bookmark key now includes media_filter, so each media filter
+        # keeps its own resume position. Rebuild the partial unique index.
+        db.execute("DROP INDEX IF EXISTS idx_image_bookmarks_auto")
+        db.executescript("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_image_bookmarks_auto
-                ON image_bookmarks(user_id, folder_id, is_favorites, search_query)
+                ON image_bookmarks(user_id, folder_id, is_favorites, search_query, media_filter)
                 WHERE kind = 'auto';
+            CREATE INDEX IF NOT EXISTS idx_images_media_type ON images(media_type);
         """)
 
         # Scan workers live in memory threads. After a restart no worker can finish,

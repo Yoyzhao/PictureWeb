@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { CollectionTag, Delete, Edit, Picture, Position } from '@element-plus/icons-vue'
+import { CollectionTag, Delete, Edit, Picture, Position, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { useBookmarkStore } from '@/stores/bookmark'
 import type { Bookmark } from '@/stores/bookmark'
@@ -29,8 +29,10 @@ const contextLabel = (bookmark: Bookmark) => {
   } else if (bookmark.folder_id) {
     parts.push(bookmark.folder_name || '未知文件夹')
   } else {
-    parts.push('所有照片')
+    parts.push('所有媒体')
   }
+  if (bookmark.media_filter === 'image') parts.push('图片')
+  if (bookmark.media_filter === 'video') parts.push('视频')
   if (bookmark.search_query) parts.push(`搜索「${bookmark.search_query}」`)
   const sort = sortLabels[bookmark.sort_by] || bookmark.sort_by
   parts.push(`${sort} ${bookmark.sort_order === 'ASC' ? '升序' : '降序'}`)
@@ -144,6 +146,9 @@ watch(() => props.modelValue, (visible) => {
           <div class="bookmark-thumb">
             <img v-if="thumbnailUrl(bookmark)" :src="thumbnailUrl(bookmark)" :alt="anchorName(bookmark)" loading="lazy" decoding="async" />
             <el-icon v-else><Picture /></el-icon>
+            <span v-if="bookmark.anchor_media_type === 'video'" class="thumb-badge" aria-hidden="true">
+              <el-icon><VideoPlay /></el-icon>
+            </span>
           </div>
           <div class="bookmark-body">
             <div class="bookmark-name" :title="bookmark.name">{{ bookmark.name }}</div>
@@ -248,6 +253,26 @@ watch(() => props.modelValue, (visible) => {
   justify-content: center;
   flex-shrink: 0;
   font-size: 20px;
+  position: relative;
+}
+
+.thumb-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(15, 18, 22, 0.72);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+}
+
+.thumb-badge .el-icon {
+  font-size: 11px;
 }
 
 .bookmark-thumb img {

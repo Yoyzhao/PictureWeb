@@ -18,6 +18,8 @@ def main():
     parser.add_argument('--limit', type=int, default=None, help='Maximum number of images to process')
     parser.add_argument('--size', choices=['small', 'medium'], default='small', help='Thumbnail size type')
     parser.add_argument('--rebuild', action='store_true', help='Regenerate existing thumbnails (format migration)')
+    parser.add_argument('--media', choices=['image', 'video', 'all'], default='all',
+                        help='Restrict to images, videos, or both (video posters need FFmpeg)')
     args = parser.parse_args()
 
     app = create_app()
@@ -26,10 +28,11 @@ def main():
             folder_id=args.folder,
             limit=args.limit,
             size_type=args.size,
-            force=args.rebuild
+            force=args.rebuild,
+            media=None if args.media == 'all' else args.media
         )
 
-    print(f"Thumbnail prebuild finished: {processed} images attempted.")
+    print(f"Thumbnail prebuild finished: {processed} media files attempted.")
 
 
 if __name__ == '__main__':

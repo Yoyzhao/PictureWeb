@@ -3,7 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useImageStore } from '@/stores/image'
 import { useAuthStore } from '@/stores/auth'
 import { storeToRefs } from 'pinia'
-import { Refresh, Delete, Back, Warning, Grid, List } from '@element-plus/icons-vue'
+import { Refresh, Delete, Back, Warning, Grid, List, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import VirtualWaterfall from '@/components/common/VirtualWaterfall.vue'
 
@@ -52,7 +52,7 @@ const handleRestore = async (id?: number) => {
   if (success) {
     selectedTrashIds.value = []
     // Backend re-inserts the image row and refreshes the gallery automatically.
-    ElMessage.info('图片已恢复到原文件夹。')
+    ElMessage.info('已恢复到原文件夹。')
   }
 }
 
@@ -118,7 +118,18 @@ const formatDate = (dateStr: string) => {
 const imageAspectRatio = (img: any) => {
   const width = Number(img.width) || 0
   const height = Number(img.height) || 0
-  return width > 0 && height > 0 ? `${width} / ${height}` : '4 / 3'
+  if (width > 0 && height > 0) return `${width} / ${height}`
+  return img.media_type === 'video' ? '16 / 9' : '4 / 3'
+}
+
+const formatDuration = (seconds: number | null | undefined) => {
+  const total = Math.floor(Number(seconds) || 0)
+  if (total <= 0) return ''
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const secs = total % 60
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`
 }
 </script>
 
@@ -219,16 +230,22 @@ const imageAspectRatio = (img: any) => {
               <div class="card-checkbox" @click.stop="toggleSelection(img.id)">
                   <el-checkbox :model-value="isSelected(img.id)"></el-checkbox>
               </div>
-              <img
-                :src="`/api/images/trash/${img.id}/thumbnail?size=${trashThumbnailSize}&token=${token}`"
-                loading="lazy"
-                decoding="async"
-                :width="img.width || undefined"
-                :height="img.height || undefined"
-                :style="{ aspectRatio: imageAspectRatio(img) }"
-                :alt="img.file_name"
-                :title="img.file_name"
-              />
+              <div class="thumb-wrap">
+                <img
+                  :src="`/api/images/trash/${img.id}/thumbnail?size=${trashThumbnailSize}&token=${token}`"
+                  loading="lazy"
+                  decoding="async"
+                  :width="img.width || undefined"
+                  :height="img.height || undefined"
+                  :style="{ aspectRatio: imageAspectRatio(img) }"
+                  :alt="img.file_name"
+                  :title="img.file_name"
+                />
+                <div v-if="img.media_type === 'video'" class="video-badge" aria-hidden="true">
+                  <el-icon><VideoPlay /></el-icon>
+                  <span v-if="formatDuration(img.duration)">{{ formatDuration(img.duration) }}</span>
+                </div>
+              </div>
               <div class="card-overlay">
                   <div class="trash-actions">
                     <el-button 
@@ -362,6 +379,34 @@ const imageAspectRatio = (img: any) => {
   background: var(--bg-secondary);
   flex: 0 0 auto;
   transition: transform var(--motion-base) var(--ease-out);
+}
+
+.thumb-wrap {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.video-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(15, 18, 22, 0.72);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.2;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.video-badge .el-icon {
+  font-size: 13px;
 }
 
 .img-info {

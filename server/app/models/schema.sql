@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_folders_path ON folders(path);
 CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id);
 CREATE INDEX IF NOT EXISTS idx_folders_public ON folders(is_public);
 
--- Images table
+-- Images table (also stores videos; media_type distinguishes them)
 CREATE TABLE IF NOT EXISTS images (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_path TEXT UNIQUE NOT NULL,
@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS images (
     width INTEGER,
     height INTEGER,
     format VARCHAR(10),
+    media_type VARCHAR(10) NOT NULL DEFAULT 'image',
+    duration REAL,
+    video_codec VARCHAR(20),
+    audio_codec VARCHAR(20),
     folder_id INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -52,6 +56,7 @@ CREATE INDEX IF NOT EXISTS idx_images_modified_time ON images(modified_time);
 CREATE INDEX IF NOT EXISTS idx_images_folder_modified ON images(folder_id, modified_time);
 CREATE INDEX IF NOT EXISTS idx_images_file_name ON images(file_name);
 CREATE INDEX IF NOT EXISTS idx_images_file_size ON images(file_size);
+-- idx_images_media_type is created in migrate_db() after old databases gain the column.
 
 -- User Favorites table
 CREATE TABLE IF NOT EXISTS user_favorites (
@@ -117,6 +122,7 @@ CREATE TABLE IF NOT EXISTS image_bookmarks (
     folder_id INTEGER NOT NULL DEFAULT 0,       -- 0 = all accessible photos
     is_favorites INTEGER NOT NULL DEFAULT 0,
     search_query TEXT NOT NULL DEFAULT '',
+    media_filter VARCHAR(10) NOT NULL DEFAULT 'all',
     sort_by VARCHAR(20) NOT NULL DEFAULT 'modified_time',
     sort_order VARCHAR(4) NOT NULL DEFAULT 'DESC',
     anchor_image_id INTEGER NOT NULL,
@@ -129,9 +135,7 @@ CREATE TABLE IF NOT EXISTS image_bookmarks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_image_bookmarks_user ON image_bookmarks(user_id, kind, updated_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_image_bookmarks_auto
-    ON image_bookmarks(user_id, folder_id, is_favorites, search_query)
-    WHERE kind = 'auto';
+-- idx_image_bookmarks_auto is created in migrate_db() after old databases gain media_filter.
 
 -- Trash table
 CREATE TABLE IF NOT EXISTS trash (
