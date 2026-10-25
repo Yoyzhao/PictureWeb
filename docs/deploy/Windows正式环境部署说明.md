@@ -258,3 +258,19 @@ servy-cli status --name="PictureWeb"
 - **服务状态**：验证用进程已停止，5000 端口已释放；`PictureWeb` 仍为 Stopped。需以管理员执行 `servy-cli start --name="PictureWeb"` 或 `Start-Service PictureWeb` 启动。
 - **登录说明**：生产 `.env` 管理员密码与库内密码不一致的既有问题未处理。
 - **注意**：`web/dist` 保留旧哈希资源，当前 `index.html` 只引用新资源。
+
+## 13. 本次部署记录（2026-10-25 13:35，Bug-007/Bug-008 修复）
+
+- **目标目录**：`D:\Workspace\_deploy\PicGallery`；更新前 `PictureWeb` 为 Stopped，更新后仍为 Stopped（当前终端无管理员权限）。
+- **部署内容**：
+  - `server/app` 全量镜像（含自动书签单条化：`utils/db.py`、`routes/bookmarks.py`）。
+  - `web/dist` 覆盖（新入口 `index-BdRnK-ZH.js`、`index-4A3lJOzW.css`），包含网格工具栏容器查询与视频播放 UI。
+  - `scripts/sql-script` 与 `config.yaml` 未再改动。
+  - 源与副本 `db.py`、`bookmarks.py` SHA256 一致。
+- **保持不变**：生产 `.env`、`data/` 其余数据、`F:\_PicCache`、`logs/`、`server/venv`。
+- **备份**：数据库 `data\backups\database-20261025-133238.db`（SHA256 `9667B1DD47B2736DE7EF226C3E07CEF97A751685B35A80CED8696CC22E4A5F2E`）；旧代码与旧 dist 在 `D:\Workspace\_deploy\_backup_PicGallery_20261025-133238`。
+- **迁移验证**：手动启动生产副本完成迁移，自动书签由 6 条合并为 1 条；索引变为 `idx_image_bookmarks_auto ON image_bookmarks(user_id) WHERE kind='auto'`；手动书签 0 条。
+- **生产库现状**：6 文件夹、26,072 媒体记录（其中 118 个视频）、1 条自动书签；匿名可见图片 43。
+- **视频烟测**：视频 raw 返回 `206`、`video/mp4`、`no-store`；封面返回 `200 image/webp`；视频封面记录 124 条。
+- **服务状态**：验证进程已停止，5000 端口释放；需管理员执行 `servy-cli start --name="PictureWeb"` 或 `Start-Service PictureWeb`。
+- **注意**：生产视频多为 HEVC（手机拍摄），浏览器通常不能直接播放，会进入错误层并提供本地播放器入口；离线 `remux_videos.py` 只处理 H.264，HEVC 需真转码或继续用 VLC。

@@ -111,7 +111,7 @@
 | 组件 | 版本 | 连接方式/备注 |
 |------|------|---------------|
 | 主数据库（测试） | SQLite3 | `data/db/database.db`；`images` 表含 `media_type/duration/video_codec/audio_codec`，`image_bookmarks` 含 `media_filter`；4 个文件夹、21,159 条媒体记录、3 个用户（2026-10-25 实测） |
-| 主数据库（生产） | SQLite3 | 部署副本 `D:\Workspace\_deploy\PicGallery\data\database.db`；不得用于测试写入 |
+| 主数据库（生产） | SQLite3 | 部署副本 `D:\Workspace\_deploy\PicGallery\data\database.db`；6 文件夹、26,072 媒体记录（118 视频）、1 自动书签（2026-10-25 13:35 实测）；不得用于测试写入 |
 | 缓存 | 无独立缓存服务 | 缩略图文件缓存 + 浏览器端预加载 |
 | 对象存储 | 无 | 直接读写本地文件系统 |
 | 消息队列 | 无 | 扫描任务使用 Python 线程（`Thread`） |
