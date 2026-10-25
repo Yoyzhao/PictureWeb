@@ -892,7 +892,7 @@ onUnmounted(() => {
   <div
     v-if="visible"
     class="lightbox"
-    :class="{ 'ui-visible': !uiHidden, 'ui-hidden': uiHidden, 'video-mode': isVideo }"
+    :class="{ 'ui-visible': !uiHidden, 'ui-hidden': uiHidden, 'video-mode': isVideo, 'meta-open': isVideo && showLightboxImageInfo }"
     role="dialog"
     aria-modal="true"
     aria-label="媒体预览"
@@ -983,16 +983,6 @@ onUnmounted(() => {
         </div>
       </transition>
 
-      <button
-        v-if="isVideo && !videoError && resumePosition !== null"
-        class="resume-chip"
-        @click.stop="resumePlayback"
-        @touchstart.stop
-      >
-        <el-icon><VideoPlay /></el-icon>
-        <span>从 {{ formatDuration(resumePosition) }} 继续播放</span>
-      </button>
-
       <div
         v-if="isVideo && !videoError"
         class="video-controls"
@@ -1013,7 +1003,16 @@ onUnmounted(() => {
         <button class="vc-btn vc-skip" title="快进 10 秒" aria-label="快进 10 秒" @click="seekBy(10)">
           <span>10s</span><el-icon><DArrowRight /></el-icon>
         </button>
-        <span class="vc-time">{{ videoTimeText }}</span>
+        <button
+          v-if="resumePosition !== null"
+          class="vc-btn vc-resume"
+          :title="`从 ${formatDuration(resumePosition)} 继续播放`"
+          @click="resumePlayback"
+        >
+          <el-icon><VideoPlay /></el-icon>
+          <span>继续 {{ formatDuration(resumePosition) }}</span>
+        </button>
+        <span v-else class="vc-time">{{ videoTimeText }}</span>
         <span v-if="videoRate !== 1" class="vc-rate">{{ videoRate }}×</span>
         <button class="vc-btn" :title="videoMuted ? '取消静音' : '静音'" :aria-label="videoMuted ? '取消静音' : '静音'" @click="toggleMute">
           <el-icon>
@@ -1246,9 +1245,17 @@ onUnmounted(() => {
     transition: none;
 }
 
+.lightbox.video-mode {
+    /* Bottom band reserved for the custom control bar and the native control strip. */
+    --video-reserved: 180px;
+}
+
+.lightbox.video-mode.meta-open {
+    /* The bottom metadata pill needs its own band; keep the video clear of both. */
+    --video-reserved: 320px;
+}
+
 .video-stage {
-    /* Reserve space for the bottom control bar and the native control strip. */
-    --video-reserved: 120px;
     position: relative;
     width: min(100%, calc((100dvh - var(--video-reserved)) * var(--video-ar, 1.7778)));
     aspect-ratio: var(--video-ar, 1.7778);
@@ -1451,29 +1458,13 @@ onUnmounted(() => {
     display: flex;
 }
 
-.resume-chip {
-    position: fixed;
-    bottom: 84px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 18px;
-    border-radius: var(--radius-pill);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(15, 18, 22, 0.82);
-    color: #fff;
-    font-size: 13px;
-    cursor: pointer;
-    backdrop-filter: blur(12px);
-    z-index: 1013;
-    transition: background-color var(--motion-fast) var(--ease-out);
+.vc-resume {
+    padding: 0 8px;
 }
 
-.resume-chip:hover {
-    background: var(--primary);
-    border-color: var(--primary);
+.vc-resume span {
+    font-size: 11px;
+    white-space: nowrap;
 }
 
 /* 图片切换动画 - 向左滑动 (下一页) */
@@ -1752,8 +1743,12 @@ onUnmounted(() => {
         height: 100%;
     }
 
-    .video-stage {
-        --video-reserved: 168px;
+    .lightbox.video-mode {
+        --video-reserved: 200px;
+    }
+
+    .lightbox.video-mode.meta-open {
+        --video-reserved: 340px;
     }
 
     .video-controls {
@@ -1777,9 +1772,12 @@ onUnmounted(() => {
         padding: 0 2px;
     }
 
-    .resume-chip {
-        bottom: 92px;
-        max-width: calc(100vw - 40px);
+    .vc-resume {
+        padding: 0 4px;
+    }
+
+    .vc-resume span {
+        font-size: 10.5px;
     }
 
     .image-meta {

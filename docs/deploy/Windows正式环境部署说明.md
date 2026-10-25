@@ -274,3 +274,23 @@ servy-cli status --name="PictureWeb"
 - **视频烟测**：视频 raw 返回 `206`、`video/mp4`、`no-store`；封面返回 `200 image/webp`；视频封面记录 124 条。
 - **服务状态**：验证进程已停止，5000 端口释放；需管理员执行 `servy-cli start --name="PictureWeb"` 或 `Start-Service PictureWeb`。
 - **注意**：生产视频多为 HEVC（手机拍摄），浏览器通常不能直接播放，会进入错误层并提供本地播放器入口；离线 `remux_videos.py` 只处理 H.264，HEVC 需真转码或继续用 VLC。
+
+## 14. 本次部署记录（2026-10-25 13:52，Bug-009 缩略图兜底）
+
+- **目标目录**：`D:\Workspace\_deploy\PicGallery`；`PictureWeb` 更新前后均为 Stopped（终端无管理员权限）。
+- **部署内容**：`web/dist` 更新为 `index-DYLv407X.js` / `index-wO6HYiUM.css`，包含网格、回收站、书签抽屉缩略图的一次性 `retry=1` 兜底；`server/app` 全量镜像（与上次一致，无后端变更）。
+- **备份**：数据库 `data\backups\database-20261025-134929.db`（SHA256 `176893DAB76B0F2DE19BBDD7324D71BFB82E205F620EF46361DE6A2A93FFF6F3`）；旧 dist 与旧代码在 `D:\Workspace\_deploy\_backup_PicGallery_20261025-134929`。
+- **迁移**：无表结构变更；自动书签仍为 1 条。
+- **烟测**：`/api/health` 200、`/api/settings` 200、匿名图片 43、首页引用新资源；缩略图带 `&retry=1` 返回 `200 image/jpeg`、`public, max-age=86400`、`Content-Length` 正常。
+- **服务状态**：验证进程已停止，5000 端口释放；需管理员执行 `servy-cli start --name="PictureWeb"` 或 `Start-Service PictureWeb`。
+- **说明**：`ERR_CACHE_READ_FAILURE` 属客户端 Chrome 磁盘缓存损坏；除代码兜底外，用户首次访问建议硬刷新或清理“缓存的图片和文件”。
+
+## 15. 本次部署记录（2026-10-25 14:11，Bug-010 视频灯箱控件避让）
+
+- **目标目录**：`D:\Workspace\_deploy\PicGallery`；用户先以管理员手动停止 `PictureWeb`，当前终端无管理员权限。
+- **部署内容**：仅更新 `web/dist`（`robocopy /MIR`），新产物 `index-j4ZioCTR.js`（SHA256 `B56CAD9C…389512`）、`index-wO6HYiUM.css`、`Lightbox-zrt9_P_O.js`（`0C4043EF…1B0A3`）、`Lightbox-DGkoUbau.css`（`3D3BCC6A…374BF`）；清理 70 个旧版本资源文件；后端代码与数据库无变更。
+- **备份**：旧 dist 备份至 `D:\Workspace\_deploy\_backup_PicGallery_20261025-1411\web-dist`；数据库备份 `data\backups\database-20261025-1411.db`（SHA256 `AAF2822FC968E9557F20EDB2411A1F0222C575B777AF55B12AD7CD40D65EE537`）。
+- **迁移**：无表结构变更，未执行迁移。
+- **烟测**（手动启动 `prod_run.py`）：`/api/health` 200、`/api/settings` 200、匿名图片 43；首页引用 `index-j4ZioCTR.js` 与 `index-wO6HYiUM.css`；Lightbox chunk 含 `meta-open` 标记；旧资源 `index-DYLv407X.js` 返回 404（已清理）。
+- **服务状态**：验证进程已停止，5000 端口已释放，`PictureWeb` 为 Stopped；需管理员执行 `Start-Service PictureWeb` 恢复生产服务。
+- **说明**：本次只修复视频灯箱底部控制条遮挡原生进度条（`meta-open` 动态预留 + 续播按钮并入控制条），无后端与数据变更。
