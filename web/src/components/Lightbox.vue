@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import api from '@/api'
-import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading, Rank, InfoFilled, CollectionTag, View, Hide, Monitor, Link, Download } from '@element-plus/icons-vue'
+import { Close, ArrowLeft, ArrowRight, RefreshRight, Crop, Edit, Star, FullScreen, Delete, Loading, Rank, InfoFilled, CollectionTag, View, Hide, Monitor, Link, Download, More, VideoPlay, VideoPause, DArrowLeft, DArrowRight, Mute, Microphone, Setting } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import type { Image as ImageItem } from '@/stores/image'
 import { useImageStore } from '@/stores/image'
@@ -75,6 +75,253 @@ const formatDuration = (seconds?: number | null) => {
   const pad = (value: number) => String(value).padStart(2, '0')
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`
 }
+
+// --- Video playback state -------------------------------------------------
+const VIDEO_IDLE_MS = 2500
+const VIDEO_POSITION_PREFIX = 'picgallery.videoPosition.'
+const VIDEO_RESUME_MIN_SECONDS = 5
+
+const videoPlaying = ref(false)
+const videoCurrentTime = ref(0)
+const videoDuration = ref(0)
+const videoMuted = ref(false)
+const videoUiIdle = ref(false)
+const videoBuffering = ref(false)
+const videoRate = ref(1)
+const resumePosition = ref<number | null>(null)
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
+let videoIdleTimer: number | undefined
+let resumeChipTimer: number | undefined
+let lastSavedSecond = -1
+
+const videoAspectRatio = computed(() => {
+  const width = Number(props.image?.width) || 0
+  const height = Number(props.image?.height) || 0
+  return width > 0 && height > 0 ? width / height : 16 / 9
+})
+
+const videoTimeText = computed(() =>
+  `${formatDuration(videoCurrentTime.value) || '0:00'} / ${formatDuration(videoDuration.value) || '0:00'}`
+)
+const uiHidden = computed(() => (isVideo.value ? videoUiIdle.value : !showUI.value))
+
+const positionKey = (id?: number) => (id ? `${VIDEO_POSITION_PREFIX}${id}` : '')
+
+const readSavedPosition = (id?: number) => {
+  if (!id) return null
+  const raw = Number(localStorage.getItem(positionKey(id)))
+  return Number.isFinite(raw) && raw >= VIDEO_RESUME_MIN_SECONDS ? raw : null
+}
+
+const saveVideoPosition = () => {
+  if (!isVideo.value || !props.image || videoError.value) return
+  const element = videoRef.value
+  if (!element) return
+  const time = element.currentTime
+  if (!Number.isFinite(time) || time < VIDEO_RESUME_MIN_SECONDS || element.ended) return
+  localStorage.setItem(positionKey(props.image.id), String(Math.floor(time)))
+}
+
+const clearVideoPosition = (id?: number) => {
+  if (id) localStorage.removeItem(positionKey(id))
+}
+
+const clearVideoIdleTimer = () => {
+  if (videoIdleTimer) {
+    clearTimeout(videoIdleTimer)
+    videoIdleTimer = undefined
+  }
+}
+
+const clearResumeChipTimer = () => {
+  if (resumeChipTimer) {
+    clearTimeout(resumeChipTimer)
+    resumeChipTimer = undefined
+  }
+}
+
+const showVideoChrome = () => {
+  videoUiIdle.value = false
+  clearVideoIdleTimer()
+  const element = videoRef.value
+  // Keep the controls visible while paused; only auto-hide during playback.
+  if (!isVideo.value || videoError.value || !element || element.paused) return
+  videoIdleTimer = window.setTimeout(() => {
+    videoUiIdle.value = true
+  }, VIDEO_IDLE_MS)
+}
+
+const markVideoActivity = () => {
+  if (!isVideo.value) return
+  showVideoChrome()
+}
+
+const handleStageClick = () => {
+  if (isVideo.value) {
+    markVideoActivity()
+    return
+  }
+  toggleUI()
+}
+
+const handleVideoSurfaceClick = () => {
+  markVideoActivity()
+}
+
+const handleVideoLoaded = () => {
+  const element = videoRef.value
+  videoDuration.value = element?.duration || props.image?.duration || 0
+  videoCurrentTime.value = element?.currentTime || 0
+  videoBuffering.value = false
+  if (element) element.playbackRate = videoRate.value
+
+  const saved = readSavedPosition(props.image?.id)
+  const duration = videoDuration.value
+  if (saved && (!duration || saved < duration * 0.95)) {
+    resumePosition.value = saved
+    clearResumeChipTimer()
+    resumeChipTimer = window.setTimeout(() => {
+      resumePosition.value = null
+    }, 8000)
+  }
+}
+
+const handleVideoTimeUpdate = () => {
+  const element = videoRef.value
+  if (!element) return
+  videoCurrentTime.value = element.currentTime
+
+  if (resumePosition.value !== null && element.currentTime > 2) {
+    resumePosition.value = null
+    clearResumeChipTimer()
+  }
+
+  if (!element.paused && !element.ended) {
+    // timeupdate fires several times per second; persist at second granularity.
+    const second = Math.floor(element.currentTime)
+    if (second !== lastSavedSecond) {
+      lastSavedSecond = second
+      saveVideoPosition()
+    }
+  }
+}
+
+const handleVideoPlay = () => {
+  videoPlaying.value = true
+  videoBuffering.value = false
+  showVideoChrome()
+}
+
+const handleVideoPause = () => {
+  videoPlaying.value = false
+  videoBuffering.value = false
+  showVideoChrome()
+  saveVideoPosition()
+}
+
+const handleVideoWaiting = () => {
+  if (!videoError.value) videoBuffering.value = true
+}
+
+const handleVideoCanPlay = () => {
+  videoBuffering.value = false
+}
+
+const handleVideoEnded = () => {
+  videoPlaying.value = false
+  videoBuffering.value = false
+  videoCurrentTime.value = videoDuration.value
+  videoUiIdle.value = false
+  clearVideoIdleTimer()
+  clearVideoPosition(props.image?.id)
+}
+
+const handleVideoVolumeChange = () => {
+  const element = videoRef.value
+  videoMuted.value = !!element && (element.muted || element.volume === 0)
+}
+
+const resumePlayback = () => {
+  const element = videoRef.value
+  if (!element || resumePosition.value === null) return
+  element.currentTime = resumePosition.value
+  element.play().catch(() => { /* user can press play manually */ })
+  resumePosition.value = null
+  clearResumeChipTimer()
+  showVideoChrome()
+}
+
+const seekBy = (delta: number) => {
+  const element = videoRef.value
+  if (!element) return
+  const duration = Number.isFinite(element.duration) ? element.duration : 0
+  const next = Math.min(Math.max(element.currentTime + delta, 0), duration || element.currentTime + delta)
+  element.currentTime = Math.max(next, 0)
+  videoCurrentTime.value = element.currentTime
+  showVideoChrome()
+}
+
+const adjustVolume = (delta: number) => {
+  const element = videoRef.value
+  if (!element) return
+  element.volume = Math.min(1, Math.max(0, element.volume + delta))
+  if (element.volume > 0) element.muted = false
+  handleVideoVolumeChange()
+  showVideoChrome()
+}
+
+const toggleMute = () => {
+  const element = videoRef.value
+  if (!element) return
+  element.muted = !element.muted
+  handleVideoVolumeChange()
+  showVideoChrome()
+}
+
+const toggleVideoFullscreen = () => {
+  const element = videoRef.value as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null
+  if (!element) return
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.()
+    return
+  }
+  if (element.webkitEnterFullscreen) {
+    element.webkitEnterFullscreen()
+    return
+  }
+  element.requestFullscreen?.()
+}
+
+const setPlaybackRate = (rate: number) => {
+  videoRate.value = rate
+  const element = videoRef.value
+  if (element) element.playbackRate = rate
+  showVideoChrome()
+}
+
+const togglePictureInPicture = async () => {
+  const element = videoRef.value as (HTMLVideoElement & { requestPictureInPicture?: () => Promise<unknown> }) | null
+  if (!element) return
+  try {
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture?.()
+    } else if (element.requestPictureInPicture) {
+      await element.requestPictureInPicture()
+    } else {
+      ElMessage.warning('当前浏览器不支持画中画')
+    }
+  } catch (error) {
+    ElMessage.warning('画中画启动失败，请检查浏览器权限')
+  }
+}
+
+const retryVideo = () => {
+  // Re-mount the <video> element; no-store ensures a fresh range request.
+  videoError.value = false
+  videoBuffering.value = false
+  nextTick(() => videoRef.value?.load())
+}
+// -------------------------------------------------------------------------
 
 const handleCopyPlayUrl = async () => {
   if (!props.image) return
@@ -193,6 +440,12 @@ watch(() => props.visible, (visible) => {
   if (visible) {
     fetchPreloadSetting()
     showUI.value = true // Reset UI visibility when opening
+    videoUiIdle.value = false
+  } else {
+    saveVideoPosition()
+    clearVideoIdleTimer()
+    clearResumeChipTimer()
+    videoUiIdle.value = false
   }
 })
 
@@ -333,6 +586,17 @@ watch(() => props.image?.id, () => {
   translateY.value = 0
   imageLoaded.value = false
   videoError.value = false
+  clearVideoIdleTimer()
+  clearResumeChipTimer()
+  videoPlaying.value = false
+  videoCurrentTime.value = 0
+  videoDuration.value = 0
+  videoMuted.value = false
+  videoUiIdle.value = false
+  videoBuffering.value = false
+  videoRate.value = 1
+  resumePosition.value = null
+  lastSavedSecond = -1
 })
 
 let wheelRaf = 0
@@ -547,13 +811,44 @@ const handleKeydown = (e: KeyboardEvent) => {
   const hk = hotkeys.value
 
   if (isVideo.value) {
+    const target = e.target as HTMLElement | null
+    const onVideo = target?.tagName === 'VIDEO'
+
     if (key === ' ') {
       // Native controls already handle space when the video element has focus.
-      if ((e.target as HTMLElement | null)?.tagName === 'VIDEO') return
+      if (onVideo) return
       e.preventDefault()
       toggleVideoPlayback()
       return
     }
+
+    if (key === 'ArrowLeft' || key === 'ArrowRight') {
+      if (e.shiftKey) {
+        // Shift + arrows keep switching media, matching the image lightbox.
+        e.preventDefault()
+        if (key === 'ArrowLeft' && props.hasPrev) goPrev()
+        if (key === 'ArrowRight' && props.hasNext) goNext()
+        return
+      }
+      if (onVideo) return // Native seek bar owns the arrow keys when focused.
+      e.preventDefault()
+      seekBy(key === 'ArrowLeft' ? -5 : 5)
+      return
+    }
+
+    if (key === 'ArrowUp' || key === 'ArrowDown') {
+      if (onVideo) return
+      e.preventDefault()
+      adjustVolume(key === 'ArrowUp' ? 0.1 : -0.1)
+      return
+    }
+
+    if (key.toLowerCase() === 'm') {
+      e.preventDefault()
+      toggleMute()
+      return
+    }
+
     // Image-only shortcuts do not apply to video.
     if (key === hk.ZOOM_IN || key === hk.ZOOM_OUT || key === hk.ROTATE || key === hk.RESET) return
   }
@@ -586,6 +881,9 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
   clearPreloadTimers()
+  clearVideoIdleTimer()
+  clearResumeChipTimer()
+  saveVideoPosition()
   if (wheelRaf) cancelAnimationFrame(wheelRaf)
 })
 </script>
@@ -594,11 +892,12 @@ onUnmounted(() => {
   <div
     v-if="visible"
     class="lightbox"
-    :class="{ 'ui-visible': showUI, 'ui-hidden': !showUI }"
+    :class="{ 'ui-visible': !uiHidden, 'ui-hidden': uiHidden, 'video-mode': isVideo }"
     role="dialog"
     aria-modal="true"
-    aria-label="图片预览"
-    @click="toggleUI"
+    aria-label="媒体预览"
+    @click="handleStageClick"
+    @mousemove="markVideoActivity"
     @wheel="handleWheel"
     @touchstart="handleTouchStart"
     @touchmove="handleTouchMove"
@@ -633,23 +932,40 @@ onUnmounted(() => {
                 <el-button v-if="platform === 'desktop'" size="small" @click.stop="handleDownloadM3U">
                   下载播放列表
                 </el-button>
+                <el-button size="small" @click.stop="retryVideo">重试</el-button>
                 <el-button size="small" @click.stop="handleDownloadOriginal">下载原文件</el-button>
               </div>
             </div>
-            <video
-              v-else
-              ref="videoRef"
-              :src="imageUrl"
-              :poster="videoPoster"
-              class="lightbox-video"
-              controls
-              playsinline
-              preload="metadata"
-              @click.stop="toggleUI"
-              @error="videoError = true"
-              @touchstart.stop
-              @touchend.stop
-            ></video>
+            <div v-else class="video-stage" :style="{ '--video-ar': String(videoAspectRatio) }">
+              <video
+                ref="videoRef"
+                :src="imageUrl"
+                :poster="videoPoster"
+                class="lightbox-video"
+                controls
+                playsinline
+                preload="metadata"
+                @click="handleVideoSurfaceClick"
+                @loadedmetadata="handleVideoLoaded"
+                @timeupdate="handleVideoTimeUpdate"
+                @play="handleVideoPlay"
+                @playing="handleVideoPlay"
+                @pause="handleVideoPause"
+                @ended="handleVideoEnded"
+                @waiting="handleVideoWaiting"
+                @stalled="handleVideoWaiting"
+                @canplay="handleVideoCanPlay"
+                @seeked="handleVideoCanPlay"
+                @volumechange="handleVideoVolumeChange"
+                @error="videoError = true"
+                @touchstart.stop="markVideoActivity"
+                @touchend.stop
+              ></video>
+              <div v-if="videoBuffering" class="video-buffering" role="status" aria-live="polite" @click.stop>
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>缓冲中…</span>
+              </div>
+            </div>
           </template>
           <img
             v-else
@@ -666,6 +982,60 @@ onUnmounted(() => {
           />
         </div>
       </transition>
+
+      <button
+        v-if="isVideo && !videoError && resumePosition !== null"
+        class="resume-chip"
+        @click.stop="resumePlayback"
+        @touchstart.stop
+      >
+        <el-icon><VideoPlay /></el-icon>
+        <span>从 {{ formatDuration(resumePosition) }} 继续播放</span>
+      </button>
+
+      <div
+        v-if="isVideo && !videoError"
+        class="video-controls"
+        :class="{ 'with-meta': showLightboxImageInfo }"
+        @click.stop
+        @touchstart.stop
+        @touchend.stop
+      >
+        <button class="vc-btn vc-skip" title="快退 10 秒" aria-label="快退 10 秒" @click="seekBy(-10)">
+          <el-icon><DArrowLeft /></el-icon><span>10s</span>
+        </button>
+        <button class="vc-btn vc-play" :title="videoPlaying ? '暂停' : '播放'" :aria-label="videoPlaying ? '暂停' : '播放'" @click="toggleVideoPlayback">
+          <el-icon>
+            <VideoPause v-if="videoPlaying" />
+            <VideoPlay v-else />
+          </el-icon>
+        </button>
+        <button class="vc-btn vc-skip" title="快进 10 秒" aria-label="快进 10 秒" @click="seekBy(10)">
+          <span>10s</span><el-icon><DArrowRight /></el-icon>
+        </button>
+        <span class="vc-time">{{ videoTimeText }}</span>
+        <span v-if="videoRate !== 1" class="vc-rate">{{ videoRate }}×</span>
+        <button class="vc-btn" :title="videoMuted ? '取消静音' : '静音'" :aria-label="videoMuted ? '取消静音' : '静音'" @click="toggleMute">
+          <el-icon>
+            <Mute v-if="videoMuted" />
+            <Microphone v-else />
+          </el-icon>
+        </button>
+        <el-dropdown trigger="click" placement="top" class="vc-settings">
+          <button class="vc-btn" title="播放设置" aria-label="播放设置">
+            <el-icon><Setting /></el-icon>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-for="rate in PLAYBACK_RATES" :key="rate" @click="setPlaybackRate(rate)">
+                {{ videoRate === rate ? '✓ ' : '' }}{{ rate }}×
+              </el-dropdown-item>
+              <el-dropdown-item divided :icon="Monitor" @click="togglePictureInPicture">画中画</el-dropdown-item>
+              <el-dropdown-item :icon="FullScreen" @click="toggleVideoFullscreen">全屏</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
       <div class="lightbox-controls" @click.stop>
         <button v-if="hasPrev" class="control-btn prev-btn" aria-label="上一张" @click.stop="goPrev" @touchstart.stop @touchend.stop>
           <el-icon><ArrowLeft /></el-icon>
@@ -676,60 +1046,94 @@ onUnmounted(() => {
       </div>
 
       <div class="lightbox-toolbar" @touchstart.stop @touchend.stop @click.stop>
-        <button v-if="!isVideo" title="旋转" aria-label="旋转" @click="handleRotate"><el-icon><RefreshRight /></el-icon></button>
-        <button v-if="!isVideo" title="重置" aria-label="重置视图" @click="handleReset"><el-icon><FullScreen /></el-icon></button>
-        <button v-if="!isVideo" title="裁剪（开发中）" aria-label="裁剪（开发中）" class="disabled"><el-icon><Crop /></el-icon></button>
-        <el-dropdown v-if="isVideo" trigger="click" class="player-dropdown">
-          <button title="用本地播放器打开" aria-label="用本地播放器打开" class="player-btn">
-            <el-icon><Monitor /></el-icon>
+        <template v-if="isVideo">
+          <el-dropdown trigger="click" class="player-dropdown">
+            <button title="用本地播放器打开" aria-label="用本地播放器打开" class="player-btn">
+              <el-icon><Monitor /></el-icon>
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-if="platform !== 'desktop'" :icon="Monitor" @click="handleOpenVlc">用 VLC 打开</el-dropdown-item>
+                <el-dropdown-item :icon="Link" @click="handleCopyPlayUrl">复制播放地址</el-dropdown-item>
+                <el-dropdown-item v-if="platform === 'desktop'" :icon="Download" @click="handleDownloadM3U">下载播放列表（M3U）</el-dropdown-item>
+                <el-dropdown-item :icon="Download" @click="handleDownloadOriginal">下载原文件</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <button
+            title="收藏"
+            aria-label="收藏"
+            class="btn-fav"
+            :class="{ active: image?.is_favorite }"
+            @click="handleFavorite"
+          >
+            <el-icon><Star /></el-icon>
           </button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item v-if="platform !== 'desktop'" :icon="Monitor" @click="handleOpenVlc">用 VLC 打开</el-dropdown-item>
-              <el-dropdown-item :icon="Link" @click="handleCopyPlayUrl">复制播放地址</el-dropdown-item>
-              <el-dropdown-item v-if="platform === 'desktop'" :icon="Download" @click="handleDownloadM3U">下载播放列表（M3U）</el-dropdown-item>
-              <el-dropdown-item :icon="Download" @click="handleDownloadOriginal">下载原文件</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <button title="重命名" aria-label="重命名" @click="handleRename"><el-icon><Edit /></el-icon></button>
-        <button v-if="canEdit" title="移动" aria-label="移动" @click="openMoveDialog"><el-icon><Rank /></el-icon></button>
-        <button
-          title="收藏"
-          aria-label="收藏"
-          class="btn-fav"
-          :class="{ active: image?.is_favorite }"
-          @click="handleFavorite"
-        >
-          <el-icon><Star /></el-icon>
-        </button>
-        <button title="信息" aria-label="查看图片信息" @click="showInfoDialog = true"><el-icon><InfoFilled /></el-icon></button>
-        <button
-          class="btn-info-toggle"
-          :class="{ active: showLightboxImageInfo }"
-          :title="showLightboxImageInfo ? '隐藏底部图片信息' : '显示底部图片信息'"
-          :aria-label="showLightboxImageInfo ? '隐藏底部图片信息' : '显示底部图片信息'"
-          @click="uiStore.toggleLightboxImageInfo()"
-        >
-          <el-icon>
-            <View v-if="showLightboxImageInfo" />
-            <Hide v-else />
-          </el-icon>
-        </button>
-        <button
-          v-if="canEdit"
-          class="btn-bookmark"
-          :class="{ active: isImageBookmarked }"
-          :title="isImageBookmarked ? '取消书签' : '书签'"
-          :aria-label="isImageBookmarked ? '取消书签' : '保存当前位置为书签'"
-          @click="handleSaveBookmark"
-        >
-          <el-icon><CollectionTag /></el-icon>
-        </button>
-        <button title="删除" aria-label="删除" class="btn-delete" @click="handleDelete">
-          <el-icon><Delete /></el-icon>
-        </button>
-        <button title="关闭" aria-label="关闭" class="close-btn" @click="emit('close')"><el-icon><Close /></el-icon></button>
+          <el-dropdown trigger="click" class="more-dropdown">
+            <button title="更多操作" aria-label="更多操作" class="more-btn">
+              <el-icon><More /></el-icon>
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item :icon="InfoFilled" @click="showInfoDialog = true">媒体信息</el-dropdown-item>
+                <el-dropdown-item :icon="View" @click="uiStore.toggleLightboxImageInfo()">
+                  {{ showLightboxImageInfo ? '隐藏底部信息' : '显示底部信息' }}
+                </el-dropdown-item>
+                <el-dropdown-item v-if="canEdit" :icon="Edit" @click="handleRename">重命名</el-dropdown-item>
+                <el-dropdown-item v-if="canEdit" :icon="Rank" @click="openMoveDialog">移动</el-dropdown-item>
+                <el-dropdown-item v-if="canEdit" :icon="CollectionTag" @click="handleSaveBookmark">
+                  {{ isImageBookmarked ? '取消书签' : '保存书签' }}
+                </el-dropdown-item>
+                <el-dropdown-item v-if="canEdit" :icon="Delete" divided class="danger-item" @click="handleDelete">删除</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <button title="关闭" aria-label="关闭" class="close-btn" @click="emit('close')"><el-icon><Close /></el-icon></button>
+        </template>
+
+        <template v-else>
+          <button title="旋转" aria-label="旋转" @click="handleRotate"><el-icon><RefreshRight /></el-icon></button>
+          <button title="重置" aria-label="重置视图" @click="handleReset"><el-icon><FullScreen /></el-icon></button>
+          <button title="裁剪（开发中）" aria-label="裁剪（开发中）" class="disabled"><el-icon><Crop /></el-icon></button>
+          <button title="重命名" aria-label="重命名" @click="handleRename"><el-icon><Edit /></el-icon></button>
+          <button v-if="canEdit" title="移动" aria-label="移动" @click="openMoveDialog"><el-icon><Rank /></el-icon></button>
+          <button
+            title="收藏"
+            aria-label="收藏"
+            class="btn-fav"
+            :class="{ active: image?.is_favorite }"
+            @click="handleFavorite"
+          >
+            <el-icon><Star /></el-icon>
+          </button>
+          <button title="信息" aria-label="查看图片信息" @click="showInfoDialog = true"><el-icon><InfoFilled /></el-icon></button>
+          <button
+            class="btn-info-toggle"
+            :class="{ active: showLightboxImageInfo }"
+            :title="showLightboxImageInfo ? '隐藏底部图片信息' : '显示底部图片信息'"
+            :aria-label="showLightboxImageInfo ? '隐藏底部图片信息' : '显示底部图片信息'"
+            @click="uiStore.toggleLightboxImageInfo()"
+          >
+            <el-icon>
+              <View v-if="showLightboxImageInfo" />
+              <Hide v-else />
+            </el-icon>
+          </button>
+          <button
+            v-if="canEdit"
+            class="btn-bookmark"
+            :class="{ active: isImageBookmarked }"
+            :title="isImageBookmarked ? '取消书签' : '书签'"
+            :aria-label="isImageBookmarked ? '取消书签' : '保存当前位置为书签'"
+            @click="handleSaveBookmark"
+          >
+            <el-icon><CollectionTag /></el-icon>
+          </button>
+          <button title="删除" aria-label="删除" class="btn-delete" @click="handleDelete">
+            <el-icon><Delete /></el-icon>
+          </button>
+          <button title="关闭" aria-label="关闭" class="close-btn" @click="emit('close')"><el-icon><Close /></el-icon></button>
+        </template>
       </div>
 
       <div class="image-meta" v-if="image && showLightboxImageInfo" @touchstart.stop @touchend.stop @click.stop>
@@ -842,15 +1246,43 @@ onUnmounted(() => {
     transition: none;
 }
 
+.video-stage {
+    /* Reserve space for the bottom control bar and the native control strip. */
+    --video-reserved: 120px;
+    position: relative;
+    width: min(100%, calc((100dvh - var(--video-reserved)) * var(--video-ar, 1.7778)));
+    aspect-ratio: var(--video-ar, 1.7778);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .lightbox-video {
-    max-width: 100%;
-    max-height: 100%;
-    width: auto;
-    height: auto;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     background: #000;
     border-radius: 4px;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+}
+
+.video-buffering {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #fff;
+    font-size: 12.5px;
+    background: rgba(0, 0, 0, 0.28);
+    border-radius: 4px;
+    pointer-events: none;
+}
+
+.video-buffering .el-icon {
+    font-size: 30px;
 }
 
 .video-error {
@@ -916,6 +1348,132 @@ onUnmounted(() => {
 .player-btn:hover {
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
+}
+
+.more-dropdown {
+    display: flex;
+}
+
+.more-btn {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.86);
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+}
+
+.more-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+:deep(.danger-item) {
+    color: #f56c6c;
+}
+
+/* 视频专用底部控制条：原生控件负责进度条，这里补充快进/快退与状态 */
+.video-controls {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: var(--radius-pill);
+    background: rgba(15, 18, 22, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(14px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 200ms ease;
+    z-index: 1012;
+}
+
+.video-controls.with-meta {
+    bottom: 80px;
+}
+
+.vc-btn {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.9);
+    height: 40px;
+    min-width: 40px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 14px;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out);
+}
+
+.vc-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.vc-play {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.vc-skip span {
+    font-size: 11px;
+    opacity: 0.85;
+}
+
+.vc-time {
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    padding: 0 6px;
+    white-space: nowrap;
+}
+
+.vc-rate {
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: -2px;
+}
+
+.vc-settings {
+    display: flex;
+}
+
+.resume-chip {
+    position: fixed;
+    bottom: 84px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border-radius: var(--radius-pill);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(15, 18, 22, 0.82);
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+    backdrop-filter: blur(12px);
+    z-index: 1013;
+    transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.resume-chip:hover {
+    background: var(--primary);
+    border-color: var(--primary);
 }
 
 /* 图片切换动画 - 向左滑动 (下一页) */
@@ -1038,10 +1596,11 @@ onUnmounted(() => {
 .lightbox.ui-visible .lightbox-toolbar,
 .lightbox.ui-visible .image-counter,
 .lightbox.ui-visible .image-meta,
-.lightbox:hover .control-btn,
-.lightbox:hover .lightbox-toolbar,
-.lightbox:hover .image-counter,
-.lightbox:hover .image-meta {
+.lightbox.ui-visible .video-controls,
+.lightbox:not(.video-mode):hover .control-btn,
+.lightbox:not(.video-mode):hover .lightbox-toolbar,
+.lightbox:not(.video-mode):hover .image-counter,
+.lightbox:not(.video-mode):hover .image-meta {
     opacity: 1;
     visibility: visible;
 }
@@ -1049,7 +1608,8 @@ onUnmounted(() => {
 .lightbox.ui-hidden .control-btn,
 .lightbox.ui-hidden .lightbox-toolbar,
 .lightbox.ui-hidden .image-counter,
-.lightbox.ui-hidden .image-meta {
+.lightbox.ui-hidden .image-meta,
+.lightbox.ui-hidden .video-controls {
     opacity: 0 !important;
     visibility: hidden !important;
     pointer-events: none;
@@ -1180,6 +1740,46 @@ onUnmounted(() => {
     .player-btn {
         width: 44px;
         height: 44px;
+    }
+
+    .more-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    .lightbox-video {
+        width: 100%;
+        height: 100%;
+    }
+
+    .video-stage {
+        --video-reserved: 168px;
+    }
+
+    .video-controls {
+        bottom: 18px;
+        gap: 4px;
+        padding: 6px 10px;
+        max-width: calc(100vw - 20px);
+    }
+
+    .video-controls.with-meta {
+        bottom: 86px;
+    }
+
+    .vc-btn {
+        min-width: 44px;
+        height: 44px;
+    }
+
+    .vc-time {
+        font-size: 11px;
+        padding: 0 2px;
+    }
+
+    .resume-chip {
+        bottom: 92px;
+        max-width: calc(100vw - 40px);
     }
 
     .image-meta {

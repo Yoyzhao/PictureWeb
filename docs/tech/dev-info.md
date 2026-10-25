@@ -54,7 +54,7 @@
 | 测试数据库 | `data/db/database.db` | 开发/测试专用；生产库在部署副本 |
 | 缩略图/回收站 | `data/cache/`、`data/trash/` | 本地开发专用；生产使用部署副本配置 |
 | 日志目录 | `data/app_logs/` | 本地运行日志；生产日志在部署副本 `logs/` |
-| 数据库脚本 | `scripts/sql-script/` | `init_db.py`、`normalize_db.py` |
+| 数据库脚本 | `scripts/sql-script/` | `init_db.py`、`normalize_db.py`、`prebuild_thumbnails.py`、`prune_cache.py`、`remux_videos.py` |
 | 部署脚本 | `scripts/deploy-script/` | `deploy_windows.ps1` |
 | 历史原型 | `docs/prototype/` | 早期静态 HTML/CSS/JS，仅作历史参考，不参与构建 |
 | 配置示例 | `config.example.yaml`、`.env.example` | 不含真实凭证 |
@@ -90,6 +90,8 @@
 | 时间字段规范化 | `.\server\venv\Scripts\python.exe scripts\sql-script\normalize_db.py` | 历史脚本，会把时间字段中的 `T` 替换为空格 |
 | 重建搜索索引 | `.\server\venv\Scripts\python.exe scripts\sql-script\init_db.py --rebuild-search-index` | 重建 FTS5 `images_fts`；FTS5 不可用时搜索回退 LIKE |
 | 缩略图预生成 | `.\server\venv\Scripts\python.exe scripts\sql-script\prebuild_thumbnails.py --limit 500 [--folder ID]` | 分批补齐缺失的 small 缩略图；全库执行耗 CPU，建议低峰分批 |
+| 孤儿缓存清理 | `.\server\venv\Scripts\python.exe scripts\sql-script\prune_cache.py [--apply]` | 默认 dry-run；清理 `cache/small|medium`、`cache/trash/small|medium` 中数据库已无引用的封面 |
+| 无损转封装 | `.\server\venv\Scripts\python.exe scripts\sql-script\remux_videos.py [--folder ID] [--limit N] [--apply] [--output-dir DIR] [--replace --yes]` | 仅处理 FLV/MKV/AVI/WMV/MOV 且 H.264+AAC/MP3 的视频，`-c copy` 输出 MP4；默认 dry-run，不删除源文件 |
 | 生产运行 | 部署副本内 `python prod_run.py` | Waitress，读取部署副本 `config.yaml` 与 `.env`，端口 5000 |
 | 自动化测试 | 无 | 仓库无 pytest / vitest / playwright 配置 |
 | 浏览器验证 | Chrome DevTools MCP 或 Browser Use | 开发入口 `http://localhost:5173`，生产入口 `http://127.0.0.1:5000` |

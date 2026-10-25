@@ -18,6 +18,9 @@
 | T-032 | 混合列表、类型筛选、视频灯箱、信息与回收站展示 | 本文 T-032 |
 | T-033 | 桌面 M3U/复制地址、Android VLC intent、iOS VLC x-callback | 本文 T-033 |
 | T-034 | 联调、真机验证、构建与文档同步 | 本文 T-034 |
+| T-035 | 视频播放交互增强（P0）：点击语义、键盘、续播、视频工具栏与底部控制条 | 本文 T-035 |
+| T-036 | 视频播放体验增强（P1）：比例占位、缓冲提示、倍速、画中画、错误重试 | 本文 T-036 |
+| T-037 | 离线无损转封装脚本：FLV/MKV 等容器 → MP4（`-c copy`） | 本文 T-037 |
 
 > 状态、负责人、优先级、依赖、阻塞与验收结论只写在 `docs/plan/project-progress.md`，本文档只维护执行细节。
 
@@ -613,6 +616,119 @@
 - 局域网限制：确认客户端与服务器同网段、5000 端口可达。
 - 回滚：代码变更可回退；数据库新增字段为增量，旧版本代码可忽略；封面缓存可删除重建。
 
+## T-035 视频播放交互增强（P0）
+
+### 目标与边界
+
+#### 目标
+
+复用灯箱作为播放舞台，但把视频交互从图片逻辑中分离：点击不被误认为“隐藏界面”、键盘可快进快退、长视频可续播、移动端控件不压住画面。
+
+#### 范围内
+
+- 视频模式点击语义与控件自动隐藏。
+- 视频键盘映射（播放/暂停、±5s、音量、静音）。
+- localStorage 续播位置与“继续播放”提示。
+- 视频工具栏收敛（播放器/收藏/更多/关闭）与底部控制条。
+
+#### 范围外
+
+- 倍速、画中画、缓冲态、错误重试、比例占位（P1）。
+- 服务端播放进度、字幕、播放列表、独立视频详情页。
+
+### 技术方案（轻量 5B）
+
+- 点击：根容器在 `video-mode` 下不再隐藏 UI；点击画面仅刷新控件，播放/暂停交给原生控件；图片模式保持原 `toggleUI`。
+- 自动隐藏：播放中静止 2.5s 隐藏工具栏、底部条、元数据与左右切换；鼠标移动/触控/按键恢复；暂停与错误层常显。
+- 键盘：Space 播放/暂停；←/→ ±5s；Shift+←/→ 切换媒体；↑/↓ 音量；M 静音；焦点在 `<video>` 时让原生控件处理方向键与空格。
+- 续播：`picgallery.videoPosition.<id>` 按秒保存；打开时位置 >5s 且 <95% 显示“从 mm:ss 继续播放”，8s 未操作自动消失；播放结束清除。
+- 工具栏：视频只保留“本地播放器 / 收藏 / 更多 / 关闭”，更多内含信息、底部信息、重命名、移动、书签、删除；图片工具栏保持原样。
+- 布局：视频最大高度预留控件空间；底部条（-10s、播放/暂停、+10s、时间、静音、全屏）居中显示，移动端热区 44px。
+
+### 验证与验收
+
+- 视频工具栏为 4 个入口，底部条 5 个按钮并显示 `当前 / 总时长`。
+- 播放 2.5s 后工具栏与底部条自动隐藏（opacity 0），鼠标移动恢复；暂停时常显。
+- ←/→ 实测 +5.02s；M 静音；↑ 取消静音；Space 暂停；位置按秒写入 localStorage。
+- 关闭后重开同视频显示“从 0:08 继续播放”，点击后从 9s 播放且提示消失。
+- 图片灯箱仍显示旋转/重置且无视频控件；503×847 视口无横向溢出，工具栏与底部条均在视口内。
+- `npm run check`、`npm run build` 通过；console 无 error/warn。
+
+## T-036 视频播放体验增强（P1）
+
+### 目标与边界
+
+#### 目标
+
+补齐长视频与弱网场景的体验：首帧前不跳变、缓冲有反馈、可调速、可画中画、失败可重试。
+
+#### 范围内
+
+- 视频舞台按数据库宽高设置 `aspect-ratio`，首帧前即占位。
+- 缓冲中浮层（`waiting`/`stalled` 显示，`playing`/`canplay`/`seeked` 隐藏）。
+- 倍速（0.5×~2×）与当前速率标记。
+- 画中画入口（不支持时提示）。
+- 错误层“重试”按钮（重新挂载 `<video>`）。
+
+#### 范围外
+
+- 字幕、播放列表、章节、跨设备续播。
+- 服务端转码/HLS。
+
+### 技术方案
+
+- `.video-stage` 使用 `--video-ar`（`width/height`，缺省 16:9）设置 `aspect-ratio`，宽度按 `(100dvh - 保留高度) * 比例` 约束，视频 `width/height:100%` + `object-fit:contain`。
+- 缓冲状态由 `<video>` 的 `waiting/stalled/canplay/playing/seeked` 事件驱动，浮层用 `role="status"` 与 `aria-live="polite"`。
+- 播放设置下拉：6 档倍速、画中画、全屏；切换倍速写入 `video.playbackRate`，非 1× 时在时间旁显示标记。
+- 画中画调用 `requestPictureInPicture`/`exitPictureInPicture`，异常与不支持时用消息提示。
+- 错误重试：清除 `videoError` 让 `<video>` 重新挂载并 `load()`，配合 `no-store` 重新发起 Range 请求；续播位置仍由 `loadedmetadata` 读取。
+
+### 验证与验收
+
+- 舞台 CSS `aspect-ratio` 为 `1.77778 / 1`，实际宽高比 1.778，首帧前不跳变。
+- 播放设置菜单含 `0.5×/0.75×/1×/1.25×/1.5×/2×/画中画/全屏`；选择 1.5× 后 `playbackRate=1.5`、时间旁显示 `1.5×`。
+- 派发 `waiting` 显示“缓冲中…”，`canplay` 后消失。
+- FLV 错误层含“重试”，点击后重新挂载并再次进入错误层（格式不支持属预期）。
+- 503×847 视口无横向溢出，舞台、工具栏、底部条均在视口内；图片灯箱无视频控件。
+- `npm run check`、`npm run build` 通过；console 无 error/warn。
+
+## T-037 离线无损转封装脚本
+
+### 目标与边界
+
+#### 目标
+
+为浏览器不支持容器、但编码本身兼容（H.264 + AAC/MP3）的视频提供离线转封装工具，输出 MP4 后重新扫描即可在浏览器播放；不做真转码，不进入 Web 运行时。
+
+#### 范围内
+
+- 新增 `scripts/sql-script/remux_videos.py`。
+- 支持按文件夹/数量筛选、输出目录、dry-run、`--replace`（需 `--yes`）。
+- 输出前检查编码与音轨兼容性，输出后 ffprobe 校验并清理失败产物。
+
+#### 范围外
+
+- HEVC/AV1 等真转码（耗时数量级更高，仍走外部播放器）。
+- Web 端转码接口、任务队列、服务端临时副本。
+
+### 技术方案
+
+- 查询 `images` 中 `media_type='video'` 且容器属于 FLV/MKV/AVI/WMV/MOV 的记录。
+- 仅当 `video_codec='h264'` 且 `audio_codec` 为 `aac`/`mp3`/无音轨时处理；其他打印跳过原因。
+- `ffmpeg -v error -nostdin -i src -map 0:v:0 -map 0:a? -c copy -movflags +faststart -n out`；超时默认 1800s。
+- 输出默认与源同目录同名 `.mp4`，重名自动加 `_1`；`--output-dir` 可集中输出。
+- 失败或 ffprobe 校验非 h264 时删除半成品；`--replace --yes` 在校验通过后删除源文件。
+- 脚本不写数据库，完成后提示重新扫描受影响文件夹。
+
+### 验证与验收
+
+- 真实库 dry-run：文件夹 28 的 10 个 FLV 全部为候选，预计输出 13.84 GiB，无跳过项。
+- 小样本实测：4 秒 FLV 0.1s 完成，输出 MP4 为 h264+aac、时长 4.04s。
+- HEVC 样本 dry-run 正确跳过并提示“需真转码”。
+- `--replace --yes` 实测：输出校验通过后删除源文件。
+- 6.4GB 4K FLV 实测转封装 48.6s，输出 6.41GB；4K 真转码 10s 需 5.6s（x264）/4.41s（nvenc），折算 1 小时约 26~33 分钟。
+- `py_compile` 通过；脚本不修改 Web 运行时与生产环境。
+
 ## 验收标准（汇总）
 
 1. 开发库迁移成功，存量图片 `media_type='image'`，无数据丢失；生产库未改动。
@@ -669,7 +785,7 @@
 
 ## 阶段完成结果
 
-- **实际产出**：`images` 新增 `media_type`/`duration`/`video_codec`/`audio_codec`，`image_bookmarks` 新增 `media_filter` 并重建自动书签唯一索引；新增 `server/app/services/video.py`；扫描器媒体类型判定、ffprobe 元数据与旋转处理；`thumbnail.py` 视频封面分支、共享占位图、500ms 锁超时与后台队列；`prebuild_thumbnails.py --media`；新增 `scripts/sql-script/prune_cache.py`；接口 `media_type` 筛选、书签 `media_filter`、raw MIME 与 `no-store`、回收站媒体字段与恢复；前端筛选控件、视频角标、灯箱 `<video>` 与错误层、信息/回收站/书签展示；新增 `web/src/utils/externalPlayer.ts` 与灯箱播放器菜单。
+- **实际产出**：`images` 新增 `media_type`/`duration`/`video_codec`/`audio_codec`，`image_bookmarks` 新增 `media_filter` 并重建自动书签唯一索引；新增 `server/app/services/video.py`；扫描器媒体类型判定、ffprobe 元数据与旋转处理；`thumbnail.py` 视频封面分支、共享占位图、500ms 锁超时与后台队列；`prebuild_thumbnails.py --media`；新增 `scripts/sql-script/prune_cache.py`；接口 `media_type` 筛选、书签 `media_filter`、raw MIME 与 `no-store`、回收站媒体字段与恢复；前端筛选控件、视频角标、灯箱 `<video>` 与错误层、信息/回收站/书签展示；新增 `web/src/utils/externalPlayer.ts` 与灯箱播放器菜单；T-035 视频播放交互（点击语义、自动隐藏、键盘、续播、工具栏收敛与底部控制条）；T-036 视频播放体验（比例占位、缓冲提示、倍速、画中画、错误重试）；T-037 离线无损转封装脚本。
 - **方案偏差**：
   1. 未采用“移动端 M3U 主路径”，改为 Android `intent://`、iOS `vlc-x-callback://.../stream`，M3U 仅桌面可选（与 ADR-001 一致）。
   2. 新增配置键 `VIDEO_PROBE_TIMEOUT`（默认 10s），用于限制扫描阶段 ffprobe 超时。
@@ -685,5 +801,5 @@
   2. 媒体读取接口鉴权缺口按用户决定另立项。
   3. 视频重命名改扩展名后 MIME 可能回退 `application/octet-stream`（已知限制）。
   4. 生产副本未同步；同步时需确认部署机存在 `D:/FFmpeg`。
-- **验收摘要**：迁移后 21,159 行图片、3 条书签完整；临时混合目录 6 个文件扫描正确（含 90° 旋转宽高交换）；MP4/WebM/MKV 生成 WebP 封面，坏文件返回占位图；API 40 项断言通过（筛选/分页/窗口/书签/Range 206/MIME/no-store/回收站往返）；浏览器筛选、角标、MP4 播放、错误层与图片灯箱回归通过，console 无 error；`py_compile`、`npm run check`、`npm run build` 通过；开发库已恢复并通过 `prune_cache.py --dry-run`。
-- **关联记录**：`CHG-20261025-04`、`ADR-001`
+- **验收摘要**：迁移后 21,159 行图片、3 条书签完整；临时混合目录 6 个文件扫描正确（含 90° 旋转宽高交换）；MP4/WebM/MKV 生成 WebP 封面，坏文件返回占位图；API 40 项断言通过（筛选/分页/窗口/书签/Range 206/MIME/no-store/回收站往返）；浏览器筛选、角标、MP4 播放、错误层与图片灯箱回归通过，console 无 error；T-035 播放交互（自动隐藏、±5s、静音、续播、移动端布局）实测通过；T-036 比例占位 1.778、倍速 1.5× 生效、缓冲浮层与重试实测通过；T-037 转封装脚本 dry-run/apply/skip/replace 实测通过（4 秒样本 0.1s，6.4GB 4K 48.6s）；`py_compile`、`npm run check`、`npm run build` 通过；开发库已恢复并通过 `prune_cache.py --dry-run`。
+- **关联记录**：`CHG-20261025-04`、`CHG-20261025-05`、`CHG-20261025-06`、`CHG-20261025-07`、`ADR-001`
