@@ -36,6 +36,23 @@ const toggleSelection = (id: number) => {
   }
 }
 
+const trashRetryKeys = new Set<string>()
+const trashRetryVersion = ref(0)
+
+const trashThumbnailUrl = (img: any) => {
+  void trashRetryVersion.value
+  const key = `${img.id}:${trashThumbnailSize.value}`
+  const retry = trashRetryKeys.has(key) ? '&retry=1' : ''
+  return `/api/images/trash/${img.id}/thumbnail?size=${trashThumbnailSize.value}&token=${token.value}${retry}`
+}
+
+const handleTrashThumbError = (img: any) => {
+  const key = `${img.id}:${trashThumbnailSize.value}`
+  if (trashRetryKeys.has(key)) return
+  trashRetryKeys.add(key)
+  trashRetryVersion.value++
+}
+
 onMounted(() => {
   imageStore.fetchTrash()
 })
@@ -232,7 +249,7 @@ const formatDuration = (seconds: number | null | undefined) => {
               </div>
               <div class="thumb-wrap">
                 <img
-                  :src="`/api/images/trash/${img.id}/thumbnail?size=${trashThumbnailSize}&token=${token}`"
+                  :src="trashThumbnailUrl(img)"
                   loading="lazy"
                   decoding="async"
                   :width="img.width || undefined"
@@ -240,6 +257,7 @@ const formatDuration = (seconds: number | null | undefined) => {
                   :style="{ aspectRatio: imageAspectRatio(img) }"
                   :alt="img.file_name"
                   :title="img.file_name"
+                  @error="handleTrashThumbError(img)"
                 />
                 <div v-if="img.media_type === 'video'" class="video-badge" aria-hidden="true">
                   <el-icon><VideoPlay /></el-icon>

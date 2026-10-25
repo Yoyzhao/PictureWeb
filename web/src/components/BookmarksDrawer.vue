@@ -42,8 +42,21 @@ const contextLabel = (bookmark: Bookmark) => {
 const anchorName = (bookmark: Bookmark) =>
   bookmark.image_file_name || bookmark.anchor_file_name || '原图已删除'
 
-const thumbnailUrl = (bookmark: Bookmark) =>
-  bookmark.anchor_exists ? `/api/images/${bookmark.anchor_image_id}/thumbnail?size=small` : ''
+const bookmarkThumbRetry = new Set<number>()
+const bookmarkThumbVersion = ref(0)
+
+const thumbnailUrl = (bookmark: Bookmark) => {
+  if (!bookmark.anchor_exists) return ''
+  void bookmarkThumbVersion.value
+  const retry = bookmarkThumbRetry.has(bookmark.anchor_image_id) ? '&retry=1' : ''
+  return `/api/images/${bookmark.anchor_image_id}/thumbnail?size=small${retry}`
+}
+
+const handleBookmarkThumbError = (bookmark: Bookmark) => {
+  if (bookmarkThumbRetry.has(bookmark.anchor_image_id)) return
+  bookmarkThumbRetry.add(bookmark.anchor_image_id)
+  bookmarkThumbVersion.value++
+}
 
 const formattedTime = (value: string) => {
   if (!value) return ''
@@ -144,7 +157,7 @@ watch(() => props.modelValue, (visible) => {
           @click="handleRestore(bookmark)"
         >
           <div class="bookmark-thumb">
-            <img v-if="thumbnailUrl(bookmark)" :src="thumbnailUrl(bookmark)" :alt="anchorName(bookmark)" loading="lazy" decoding="async" />
+            <img v-if="thumbnailUrl(bookmark)" :src="thumbnailUrl(bookmark)" :alt="anchorName(bookmark)" loading="lazy" decoding="async" @error="handleBookmarkThumbError(bookmark)" />
             <el-icon v-else><Picture /></el-icon>
             <span v-if="bookmark.anchor_media_type === 'video'" class="thumb-badge" aria-hidden="true">
               <el-icon><VideoPlay /></el-icon>

@@ -2,6 +2,40 @@
 
 > 记录需留痕的 Bug 现象、根因、修复与验证证据。索引见 `bug-index.md`。
 
+## [Bug-009] 缩略图批量报 ERR_CACHE_READ_FAILURE，卡片显示空白
+
+- **ID**：Bug-009
+- **日期**：2026-10-25
+- **发生阶段/切片**：M2/M4 媒体网格（客户端缓存）
+- **严重程度**：Medium
+- **关联任务/变更**：T-032；CHG-20261025-08
+- **影响范围**：网格、回收站、书签抽屉中的缩略图 `<img>`；特定客户端 Chrome 缓存
+- **现象**：浏览器控制台出现大量 `thumbnail?size=small:1 Failed to load resource: net::ERR_CACHE_READ_FAILURE`，对应卡片缩略图空白；服务端日志无 4xx/5xx，接口单独请求返回 200。
+- **复现与排查**：
+  1. 服务端抽查 3 个缩略图：均 200，`Content-Length` 与响应体一致，ETag/Last-Modified/Cache-Control 正常；
+  2. 测试浏览器 24 个缩略图资源：`badCount=0`，缓存命中为 `transferSize=0` 且 `decodedBodySize>0`；
+  3. 对同一批 10 个 URL 连续请求两次：0 失败；
+  4. 客户端 C/D/F 磁盘剩余 73~954GB，排除磁盘满。
+- **根因**：Chrome 本地 HTTP 磁盘缓存条目损坏，读取缓存时失败，请求未到达服务端；不是缩略图生成或接口错误。`Images loaded lazily and replaced with placeholders` 只是懒加载提示，不是错误。
+- **解决方式**：
+  1. 客户端硬刷新（Ctrl+Shift+R）或清除“缓存的图片和文件”；
+  2. 应用层兜底：网格、回收站、书签抽屉的缩略图 `@error` 触发一次 `&retry=1` 重试，强制绕过损坏缓存条目走网络；每个 `图片 ID + size` 只重试一次，切换视图时清空重试状态。
+- **修复产物/版本**：`web/src/components/ImageGrid.vue`、`web/src/pages/TrashPage.vue`、`web/src/components/BookmarksDrawer.vue`（工作区，未提交 commit）
+- **验证证据**：
+  - 对卡片派发 `error` 后 `src` 由 `thumbnail?size=small` 变为 `...&retry=1`，再次派发不再变化；
+  - 重试 URL 请求返回 `200 image/webp`；
+  - 服务端抽样与浏览器压力请求均无失败；
+  - `npm run check`、`npm run build` 通过。
+- **受影响阶段重验**：M2/M4 网格、回收站、书签抽屉缩略图加载。
+- **关联关系**：与 Bug-007/Bug-008 同一轮反馈
+- **状态**：已解决（客户端缓存 + 应用兜底）
+
+### 时间线
+
+- 2026-10-25 13:58：用户反馈大量 `ERR_CACHE_READ_FAILURE` 并询问缩略图是否加载不出来。
+- 2026-10-25 14:02：服务端与浏览器压力测试确认接口正常，定位为 Chrome 磁盘缓存损坏。
+- 2026-10-25 14:06：增加一次性 cache-busting 重试并通过构建。
+
 ## [Bug-008] 自动书签按视图上下文累积，出现多条“上次浏览”
 
 - **ID**：Bug-008

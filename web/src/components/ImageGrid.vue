@@ -223,7 +223,23 @@ onMounted(() => {
 
 const emit = defineEmits(['open-lightbox'])
 
-const getThumbnailUrl = (id: number) => `/api/images/${id}/thumbnail?size=${thumbnailSize.value}`
+const getThumbnailUrl = (id: number) => {
+  // A corrupt browser disk cache can make an image fail without hitting the server;
+  // retry once with a cache-busting query so the request goes back to the network.
+  void thumbRetryVersion.value
+  const retry = thumbRetryKeys.has(`${id}:${thumbnailSize.value}`)
+  return `/api/images/${id}/thumbnail?size=${thumbnailSize.value}${retry ? '&retry=1' : ''}`
+}
+
+const thumbRetryKeys = new Set<string>()
+const thumbRetryVersion = ref(0)
+
+const handleThumbError = (img: any) => {
+  const key = `${img.id}:${thumbnailSize.value}`
+  if (thumbRetryKeys.has(key)) return
+  thumbRetryKeys.add(key)
+  thumbRetryVersion.value++
+}
 
 const columnWidthMap = {
   small: 180,
@@ -294,6 +310,8 @@ const toggleMultiSelect = () => {
 
 // Changing folder/search/sort/filter leaves selection mode to avoid accidental picking in a new view.
 watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery, mediaFilter], () => {
+  thumbRetryKeys.clear()
+  thumbRetryVersion.value++
   if (!multiSelectMode.value) return
   multiSelectMode.value = false
   imageStore.clearSelection()
@@ -408,6 +426,7 @@ watch([currentFolderId, showOnlyFavorites, sortBy, sortOrder, searchQuery, media
               :style="{ aspectRatio: imageAspectRatio(img) }"
               :alt="img.file_name"
               :title="img.file_name"
+              @error="handleThumbError(img)"
             />
             <div v-if="img.media_type === 'video'" class="video-badge" aria-hidden="true">
               <el-icon><VideoPlay /></el-icon>
